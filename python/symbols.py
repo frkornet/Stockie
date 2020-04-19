@@ -1,6 +1,6 @@
 
 LOGPATH         = '/Users/frkornet/Stockie/log/'
-DATAPATH        = "/Users/frkornet/Stockie/data/F13/"
+DATAPATH        = "/Users/frkornet/Stockie/data/"
 STOCKS_FNM      = f"{DATAPATH}stocks202002.csv"
 EXCLUDE_FNM     = f"{DATAPATH}exclude.csv"
 TRADE_FNM       = f"{DATAPATH}possible_trades.csv"
