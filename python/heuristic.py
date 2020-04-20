@@ -7,6 +7,7 @@ from tqdm    import tqdm
 import matplotlib.pyplot as plt
 
 import gc; gc.enable()
+import warnings; warnings.filterwarnings("ignore")
 
 def read_possible_trades():
     possible_trades_df = pd.read_csv(TRADE_FNM)
@@ -22,16 +23,17 @@ def print_possible_trades_stats(trades_df):
 
     fig, axs = plt.subplots(3)
 
-    trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0])
+    trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], figsize=(18,12))
     axs[0].set_title('Possible trades: trading days vs percentage gain (full set)')
 
-    train_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[1])
+    train_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[1], figsize=(18,12))
     axs[1].set_title('Possible trades: trading days vs percentage gain (training set)')
         
-    test_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[2])
+    test_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[2], figsize=(18,12))
     axs[2].set_title('Possible trades: trading days vs percentage gain (test set)')
 
-    plt.show()
+    plt.savefig(f'{LOGPATH}stats_scatter.png')
+
 
 def calc_ticker_stats(ticker_df):
     cnt_gain  = len(ticker_df)
@@ -141,7 +143,7 @@ def calc_stats_ticker(trades_df, ticker):
               'total_pct'  : [total_pct],  'daily_ret' : [daily_ret],
               'pct_desired': [pct_desired]
              }
-    log(f't_dict={t_dict}')
+    #log(f't_dict={t_dict}')
 
     return pd.DataFrame(t_dict)
 
@@ -219,9 +221,17 @@ def heuristic(ticker_stats_df, trades_df):
     # temp_df    
 
 def calc_n_print_ratios(trades_df):
-    gain_sum, gain_cnt = trades_df['gain'][trades_df.gain >  0].agg(['sum', 'count'])
-    loss_sum, loss_cnt = trades_df['gain'][trades_df.gain <  0].agg(['sum', 'count'])
-    zero_sum, zero_cnt = trades_df['gain'][trades_df.gain == 0].agg(['sum', 'count'])
+    gain_sum, gain_cnt = trades_df['gain'].loc[trades_df.gain >  0].agg(['sum', 'count'])
+    loss_sum, loss_cnt = trades_df['gain'].loc[trades_df.gain <  0].agg(['sum', 'count'])
+
+    idx = trades_df.gain == 0
+    if len(trades_df.loc[idx]) > 0:
+       zero_sum, zero_cnt = trades_df['gain'].loc[trades_df.gain == 0].agg(['sum', 'count'])
+    else:
+       zero_sum = zero_cnt = 0
+
+    gain_sum = round(gain_sum, 2)
+    loss_sum = round(loss_sum, 2)
 
     log('')
     log(f'gain_sum={gain_sum} gain_cnt={gain_cnt}')
@@ -243,6 +253,17 @@ def save_good_tickers(ticker_stats_df, good_tickers):
 
     ticker_stats_df.to_csv(STATS_FNM, index=False)    
 
+def good_subset_posible_trades(good_tickers, possible_trades_df):
+    good_df = pd.DataFrame(columns=possible_trades_df.columns)
+    for t in good_tickers:
+        gc.collect()
+        idx = possible_trades_df.ticker == t
+        df = possible_trades_df.loc[idx]
+        if len(df) > 0:
+            good_df = pd.concat([good_df, df])
+
+    return good_df
+
 def main():
     trades_df = read_possible_trades()
     #print_possible_trades_stats(trades_df)
@@ -253,7 +274,10 @@ def main():
     log('trades_df (all tickers):')
     calc_n_print_ratios(trades_df)
     log('trades_df.loc[idx] (good tickers):')
-    calc_n_print_ratios(trades_df)
+    good_df = good_subset_posible_trades(good_tickers, trades_df)
+    calc_n_print_ratios(good_df)
+    share= round((len(good_df)/len(trades_df)) * 100, 0)
+    log(f'len(good_df)/len(trades_df)={share}%')
     save_good_tickers(ticker_stats_df, good_tickers)
 
 

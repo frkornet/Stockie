@@ -1,1 +1,5 @@
-~/Stockie/*.log
+~/Stockie/data/*.csv
+~/Stockie/data/*.txt
+~/Stockie/log/*.log
+~/Stockie/log/*.png
+~/Stockie/python/__pycache__

@@ -359,7 +359,7 @@ def main():
         bt.myPnL.myCapital.df.index = bt.myPnL.myCapital.df.date
         to_plot_cols = ['capital', 'in_use']
         bt.myPnL.myCapital.df[to_plot_cols].plot(figsize=(18,10))
-        plt.savefig(f'{DATAPATH}figure_{th}.png')
+        plt.savefig(f'{LOGPATH}trade_threshold_{th}.png')
         #plt.show()
 
     log('')
@@ -379,7 +379,10 @@ def main():
         ret = round (ret * 100, 2)
         inv = list(invested_dict[th])
         len = len_tickers_dict[th]
-        log(f'{th}\t\t{cap}\t{ret}%\t{len}\t{inv}', True)
+        if cap >= 100000.0:
+            log(f'{th}\t\t{cap}\t{ret}%\t{len}\t{inv}', True)
+        else:
+            log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{inv}', True)
 
     log('')
     log('Done.')
