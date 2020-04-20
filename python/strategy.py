@@ -23,8 +23,8 @@ from datetime                import datetime, timedelta
 from util                    import open_logfile, log, get_stock, build_ticker_list, \
                                     get_current_day_and_time, is_holiday, add_days_to_date
 from pnl                     import Capital, PnL
-from symbols                 import TOLERANCE, DATAPATH, LOGPATH, STOP_LOSS, \
-                                    STATS_FNM, TRADE_FNM, BUY_FNM
+from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
+                                    STOP_LOSS, STATS_FNM, TRADE_FNM, BUY_FNM
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -292,6 +292,9 @@ class Backtester(object):
         for self.trading_day, self.trading_date in \
             enumerate(tqdm(self.backtest_trading_dates, desc="simulate trades: ")):
 
+            # if str(self.trading_date)[:10] == '2020-04-20':
+            #     log('')
+
             self.trading_date = str(self.trading_date)[:10]
             self.process_sell_signals()
             self.process_buy_opportunities()
@@ -335,12 +338,88 @@ class Backtester(object):
         self.myPnL.df.days_in_trade = self.myPnL.df.days_in_trade.astype(int)
         #self.make_buy_recommendations()
 
+    def create_sell_df(self):
+        gc.collect()
+        idx                  = self.myPnL.df.action=='SELL'
+        sell_df              = self.myPnL.df[idx].copy()
+        sell_df['gain']      = (sell_df.close_amount - sell_df.orig_amount)
+        sell_df['gain_pct']  = round((sell_df.gain / sell_df.orig_amount)*100, 2)
+        sell_df['daily_ret'] = ( (  (1 + sell_df.gain_pct/100) \
+                                ** (1/ sell_df.days_in_trade) ) - 1 ) * 100
+
+        self.sell_df = sell_df
+
+    def describe_sell_df(self):
+        log('')
+        log(f'len(self.sell_df)={len(self.sell_df)}')
+        log('')
+        cols = ['gain', 'gain_pct', 'daily_ret']
+        log(f'self.sell_df.describe():\n{self.sell_df[cols].describe()}')
+        log('')
+
+    def value_counts_sell_df(self):
+        log('')
+        log('Value counts sell_df,days_in_trade:')
+        log(f'\n{self.sell_df.days_in_trade.value_counts()}')
+        log('')
+
+    def scatter_plot(self, df, day_col, fnm):
+        df.plot.scatter(x=day_col, y='gain_pct', figsize=(18,8))
+        plt.savefig(fnm)
+
+    def sell_df_scatter_plot(self, threshold):
+        log('')
+        fnm = f'{PICPATH}sell_df_scatter_{threshold}.png'
+        log(f'Saving scatter plot self.sell_df to {fnm}')
+        self.scatter_plot(self.sell_df, 'days_in_trade', fnm)
+
+    def possible_trades_df_scatter_plot(self, threshold):
+        log('')
+        fnm = f'{PICPATH}pos_trades_df_scatter_{threshold}.png'
+        log(f'Saving scatter plot self.possible_trades_df to {fnm}')
+        self.scatter_plot(self.possible_trades_df, 'trading_days', fnm)
+
+    def calc_sum_n_count(self, df):
+        s, c =  df['gain'].agg(['sum', 'count'])
+        return int(round(s,0)), int(c)
+
+    def calc_actual_gains_losses_zeros(self):
+        df = self.sell_df
+        gain_sum, gain_cnt = self.calc_sum_n_count(df[df.gain >  0])
+        loss_sum, loss_cnt = self.calc_sum_n_count(df[df.gain <  0])
+        zero_sum, zero_cnt = self.calc_sum_n_count(df[df.gain == 0])
+
+        log('')
+        log(f'gain_sum={gain_sum}\t\tgain_cnt={gain_cnt}')
+        log(f'loss_sum={loss_sum}\tloss_cnt={loss_cnt}')
+        log(f'zero_sum={zero_sum}\t\tloss_cnt={zero_cnt}')
+        log('')
+
+        return gain_sum, loss_sum
+
+    def print_backtest_stats(self, threshold):
+        self.create_sell_df()
+        self.describe_sell_df()
+        self.value_counts_sell_df()
+        self.sell_df_scatter_plot(threshold)
+        self.possible_trades_df_scatter_plot(threshold)
+        gains, losses = self.calc_actual_gains_losses_zeros()
+
+        fnm = f'{DATAPATH}actual_{threshold}.csv'
+        log(f'Saving sell_df to {fnm}')
+        self.sell_df.to_csv(fnm, index=False)
+        return gains, losses
+
+
+
 def main():
     bt = Backtester()
 
     capital_dict = {}
     invested_dict = {}
     len_tickers_dict = {}
+    gains_dict = {}
+    loss_dict = {}
 
     thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     for th in thresholds:
@@ -350,16 +429,19 @@ def main():
         log(f'threshold={th}')
         bt.log_PnL('myPnL=')
         bt.log_invested('invested in:')
+        gains, losses = bt.print_backtest_stats(th)
 
-        # save key stats of run
-        capital_dict[th]  = bt.myPnL.capital
-        invested_dict[th] = bt.myPnL.invested.keys()
+        # save key stats of runls 
+        capital_dict[th]      = bt.myPnL.capital
+        invested_dict[th]     = bt.myPnL.invested.keys()
         len_tickers_dict[th]  = bt.len_tickers
+        gains_dict[th]        = gains
+        loss_dict[th]         = losses
 
         bt.myPnL.myCapital.df.index = bt.myPnL.myCapital.df.date
         to_plot_cols = ['capital', 'in_use']
         bt.myPnL.myCapital.df[to_plot_cols].plot(figsize=(18,10))
-        plt.savefig(f'{LOGPATH}trade_threshold_{th}.png')
+        plt.savefig(f'{PICPATH}trade_threshold_{th}.png')
         #plt.show()
 
     log('')
@@ -371,18 +453,20 @@ def main():
     log('')
 
     # Print summary...
-    log('Threshold\tCapital\t\tReturn\tLen\tInvested', True)
+    log('Threshold\tCapital\t\tReturn\tLen\tGains\tLosses\tInvested', True)
     trading_days = 757
     for th in thresholds:
-        cap = round(capital_dict[th],0)
-        ret = ( (cap/10000) ** (1/trading_days)) -1
-        ret = round (ret * 100, 2)
-        inv = list(invested_dict[th])
-        len = len_tickers_dict[th]
+        cap   = round(capital_dict[th],0)
+        ret   = ( (cap/10000) ** (1/trading_days)) -1
+        ret   = round (ret * 100, 2)
+        inv   = list(invested_dict[th])
+        len   = len_tickers_dict[th]
+        gains = gains_dict[th]
+        losses = loss_dict[th]
         if cap >= 100000.0:
-            log(f'{th}\t\t{cap}\t{ret}%\t{len}\t{inv}', True)
+            log(f'{th}\t\t{cap}\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
         else:
-            log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{inv}', True)
+            log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
 
     log('')
     log('Done.')

@@ -26,7 +26,7 @@ def get_current_day(fmt='%Y%m%d'):
     return strftime(fmt)
 
 def add_days_to_date(ds, days, fmt='%Y-%m-%d'):
-    ds_date = date.fromisoformat(ds)
+    ds_date = date.fromisoformat(str(ds)[:10])
     ds_date = ds_date + timedelta(days=int(days))
     return ds_date.__format__(fmt)
 

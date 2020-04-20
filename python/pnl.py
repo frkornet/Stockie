@@ -1,13 +1,8 @@
 import pandas                as pd
 import numpy                 as np
-from   util                  import log
+from   util                  import log, add_days_to_date
+from   symbols               import BUY, SELL, TOLERANCE, STOP_LOSS
 import yfinance              as yf
-
-# Constants
-BUY       = 1
-SELL      = 2
-TOLERANCE = 1e-6
-STOP_LOSS = -10 # max loss: -10%
 
 class Capital(object):
     """
@@ -83,6 +78,7 @@ class PnL(object):
         self.invested   = {}
         self.start      = start_date
         self.end        = end_date
+        self.end_plus_1 = add_days_to_date(end_date, 1)
         self.capital    = capital
         self.in_use     = in_use
         self.free       = free
@@ -114,7 +110,7 @@ class PnL(object):
 
         # Retrieve the historical data for stock ticker and save it while we're invested
         asset  = yf.Ticker(ticker)
-        hist   = asset.history(start=self.start, end=self.end)
+        hist   = asset.history(start=self.start, end=self.end_plus_1)
         if len(hist) == 0:
             log(f'Failed to retrieve data from yf ticker={ticker} to buy stock')
             log('Skipping...')
@@ -252,6 +248,9 @@ class PnL(object):
 
         Returns nothing.
         """
+        # if close_date == '2020-04-20':
+        #     log('')
+
         # print("day_close:")
         tickers = list(self.invested.keys())
         for ticker in tickers:
@@ -260,6 +259,7 @@ class PnL(object):
             df_idx        = (self.df.ticker == ticker) & (self.df.invested==1)
             if len(self.df.loc[df_idx]) == 0:
                 continue
+
             log(f"{ticker}:\n {self.df.loc[df_idx]}")
             no_shares     = float(self.df['no_shares'].loc[df_idx])
             close_amount  = float(self.df['close_amount'].loc[df_idx])
@@ -270,11 +270,21 @@ class PnL(object):
             self.df.loc[df_idx, 'invested'] = 0
 
             # Calculate how much the sell will earn
-            hist_idx      = self.invested[ticker].index == close_date
-            if len(self.invested[ticker].Close.loc[hist_idx]) == 0:
+            hist_idx = self.invested[ticker].index == close_date
+            hist_len = len(self.invested[ticker].Close.loc[hist_idx])
+            if close_date == '2020-04-20': 
+                log(ticker)           
+                log(self.invested[ticker].loc[hist_idx], True)
+
+            if hist_len == 0:
                 continue
 
-            share_price   = float(self.invested[ticker].Close.loc[hist_idx])
+            # Take last row in set if more than one rows are found...
+            if hist_len > 1:
+                share_price = float(self.invested[ticker].Close.loc[hist_idx].iloc[-1])
+            else:
+                share_price = float(self.invested[ticker].Close.loc[hist_idx])
+
             today_amount  = no_shares * share_price
             delta_amount  = today_amount - close_amount
             delta_pct     = (delta_amount / close_amount) * 100
@@ -301,8 +311,12 @@ class PnL(object):
             # Correct in_use and capital for delta_amount
             self.capital  = self.capital + delta_amount
             self.in_use   = self.in_use  + delta_amount
-            assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
-                   "capital and in_use + free deviating too much!"
+            tol = abs(self.capital - self.in_use - self.free)
+            # if tol == np.NaN or tol >= TOLERANCE:
+            #     log('WARNING: close_date = {close_date}')
+            #     log(f'PnL.day_close(): tol={tol} >= TOLERANCE={TOLERANCE}', True)
+
+            assert tol < TOLERANCE, "tol deviating too much!"
 
             close_dict = {'date'        : [close_date],
                          'ticker'       : [ticker],
