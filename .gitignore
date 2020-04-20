@@ -1,9 +1,6 @@
-/Users/frkornet/Stockie/.vs_code
-/Users/frkornet/Stockie/data/*.csv
-/Users/frkornet/Stockie/data/*.txt
-/Users/frkornet/Stockie/log
-/Users/frkornet/Stockie/log/*.log
-/Users/frkornet/Stockie/pic
-/Users/frkornet/Stockie/pic/*.png
-/Users/frkornet/Stockie/python/__pycache__
-/Users/frkornet/Stockie/notebook/*ntitled*.ipynb
+.vscode
+*.csv
+*.log
+*.png
+__pycache__
+*ntitled*.ipynb
