@@ -248,17 +248,14 @@ class PnL(object):
 
         Returns nothing.
         """
-        # if close_date == '2020-04-20':
-        #     log('')
 
-        # print("day_close:")
         tickers = list(self.invested.keys())
         for ticker in tickers:
             
             # Get the latest close_amount for ticker and no_shares owned
             df_idx        = (self.df.ticker == ticker) & (self.df.invested==1)
-            if len(self.df.loc[df_idx]) == 0:
-                continue
+            # if len(self.df.loc[df_idx]) == 0:
+            #     continue
 
             log(f"{ticker}:\n {self.df.loc[df_idx]}")
             no_shares     = float(self.df['no_shares'].loc[df_idx])
@@ -266,16 +263,11 @@ class PnL(object):
             orig_amount   = float(self.df['orig_amount'].loc[df_idx])
             stop_loss     = float(self.df['stop_loss'].loc[df_idx])
             days_in_trade = int(self.df['days_in_trade'].loc[df_idx])
-            #log(self.df.info())
             self.df.loc[df_idx, 'invested'] = 0
 
             # Calculate how much the sell will earn
             hist_idx = self.invested[ticker].index == close_date
             hist_len = len(self.invested[ticker].Close.loc[hist_idx])
-            if close_date == '2020-04-20': 
-                log(ticker)           
-                log(self.invested[ticker].loc[hist_idx], True)
-
             if hist_len == 0:
                 continue
 
@@ -300,22 +292,18 @@ class PnL(object):
             # Report a suspicious high change per stock/day. Threshold for now set at 10%
             # Allows us to see what other stocks may have issues than just SBT...
             if abs(delta_amount / self.capital) > 0.1:
-                log('', True)
-                log('********************', True)
-                log(f'*** WARNING      *** capital changed by more than 10% for {ticker} on {close_date}!', True)
-                log(f'***              *** no_shares={no_shares} share_price={share_price} today_amount={today_amount}', True)
-                log(f'***              *** orig_amount={orig_amount} close_amount={close_amount} delta_amount={delta_amount}', True)
-                log('********************', True)
-                log('', True)
+                log('')
+                log('********************')
+                log(f'*** WARNING      *** capital changed by more than 10% for {ticker} on {close_date}!')
+                log(f'***              *** no_shares={no_shares} share_price={share_price} today_amount={today_amount}')
+                log(f'***              *** orig_amount={orig_amount} close_amount={close_amount} delta_amount={delta_amount}')
+                log('********************')
+                log('')
             
             # Correct in_use and capital for delta_amount
             self.capital  = self.capital + delta_amount
             self.in_use   = self.in_use  + delta_amount
             tol = abs(self.capital - self.in_use - self.free)
-            # if tol == np.NaN or tol >= TOLERANCE:
-            #     log('WARNING: close_date = {close_date}')
-            #     log(f'PnL.day_close(): tol={tol} >= TOLERANCE={TOLERANCE}', True)
-
             assert tol < TOLERANCE, "tol deviating too much!"
 
             close_dict = {'date'        : [close_date],

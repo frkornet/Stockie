@@ -48,7 +48,7 @@ class Backtester(object):
 
         cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
                 'trading_days', 'daily_return', 'ticker']
-        br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col], axis=1)[cols]
+        br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col],axis=1)[cols]
 
         idx = br_df.buy_date >= max(self.possible_trades_df.buy_date)
         br_df = br_df[idx]
@@ -75,7 +75,7 @@ class Backtester(object):
         self.buy_opportunities_df = pd.read_csv(BUY_FNM)
 
         # Augment buy recommendations
-        self.ret_col = 'gain_daily_ret'
+        self.ret_col = 'daily_ret' #'gain_daily_ret'
         self.augment_possible_trades_with_buy_opportunities()
 
         # Determine start and end date for backtesting period.
@@ -456,17 +456,14 @@ def main():
     log('Threshold\tCapital\t\tReturn\tLen\tGains\tLosses\tInvested', True)
     trading_days = 757
     for th in thresholds:
-        cap   = round(capital_dict[th],0)
+        cap   = int(round(capital_dict[th]/1000,0))
         ret   = ( (cap/10000) ** (1/trading_days)) -1
         ret   = round (ret * 100, 2)
         inv   = list(invested_dict[th])
         len   = len_tickers_dict[th]
-        gains = gains_dict[th]
-        losses = loss_dict[th]
-        if cap >= 100000.0:
-            log(f'{th}\t\t{cap}\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
-        else:
-            log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
+        gains = int(round(gains_dict[th]/1000,0))
+        losses = int(round(loss_dict[th]/1000,0))
+        log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
 
     log('')
     log('Done.')
