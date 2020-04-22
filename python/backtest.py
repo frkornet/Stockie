@@ -453,17 +453,18 @@ def main():
     log('')
 
     # Print summary...
-    log('Threshold\tCapital\t\tReturn\tLen\tGains\tLosses\tInvested', True)
+    log('Threshold\tCapital\t\tGains\tLosses\tReturn\tLen\tInvested', True)
     trading_days = 757
     for th in thresholds:
-        cap   = int(round(capital_dict[th]/1000,0))
-        ret   = ( (cap/10000) ** (1/trading_days)) -1
+        cap   = capital_dict[th]
+        ret   = ( (cap/10000) ** (1/trading_days)) - 1
         ret   = round (ret * 100, 2)
         inv   = list(invested_dict[th])
         len   = len_tickers_dict[th]
+        cap   = int(round(cap/1000,0))
         gains = int(round(gains_dict[th]/1000,0))
         losses = int(round(loss_dict[th]/1000,0))
-        log(f'{th}\t\t{cap}\t\t{ret}%\t{len}\t{gains}\t{losses}\t{inv}', True)
+        log(f'{th}\t\t{cap}\t\t{gains}\t{losses}\t{ret}%\t{len}\t{inv}', True)
 
     log('')
     log('Done.')

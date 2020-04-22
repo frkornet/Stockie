@@ -23,14 +23,20 @@ def print_possible_trades_stats(trades_df):
 
     fig, axs = plt.subplots(3)
 
-    trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], figsize=(18,12))
-    axs[0].set_title('Possible trades: trading days vs percentage gain (full set)')
+    trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], \
+                           figsize=(18,12))
+    axs[0].set_title('Possible trades: trading days vs percentage'
+                     ' gain (full set)')
 
-    train_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[1], figsize=(18,12))
-    axs[1].set_title('Possible trades: trading days vs percentage gain (training set)')
+    train_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[1], \
+                                 figsize=(18,12))
+    axs[1].set_title('Possible trades: trading days vs percentage'
+                     ' gain (training set)')
         
-    test_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[2], figsize=(18,12))
-    axs[2].set_title('Possible trades: trading days vs percentage gain (test set)')
+    test_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[2], \
+                                figsize=(18,12))
+    axs[2].set_title('Possible trades: trading days vs percentage'
+                     ' gain (test set)')
 
     plt.savefig(f'{LOGPATH}stats_scatter.png')
 
@@ -85,7 +91,8 @@ def calc_zero_stats(ticker_df):
 def calc_total_stats(ticker_df):
     # Stop-loss kicks in at -10% => cap losses at 15% of buy_close
     # This is a hack that is skewing the statistics. Needs rework...
-    # ticker_df.gain.loc[ticker_df.gain/ticker_df.buy_close < -0.1] = ticker_df.buy_close * (-0.15)
+    # ticker_df.gain.loc[ticker_df.gain/ticker_df.buy_close < -0.1] = \
+    #    ticker_df.buy_close * (-0.15)
     
     total_buy  = float(ticker_df.buy_close.sum())
     total_sell = float(ticker_df.sell_close.sum())
@@ -100,7 +107,8 @@ def calc_total_stats(ticker_df):
     else:
         daily_ret = -np.Inf #  0.0
 
-    tuple = (total_buy, total_sell, total_days, total_cnt, total_pct, expected_ret, daily_ret)
+    tuple = (total_buy, total_sell, total_days, total_cnt, total_pct, 
+             expected_ret, daily_ret)
     return tuple
 
 def calc_stats_ticker(trades_df, ticker):
@@ -131,12 +139,14 @@ def calc_stats_ticker(trades_df, ticker):
               'max_gain'   : [max_gain],   'max_pct_gain':  [max_pct_gain],
               'mean_gain'  : [mean_gain],  'std_gain': [std_gain], 
               'cnt_gain'   : [cnt_gain],   'pct_gain': [pct_gain],
-              'day_gain'   : [day_gain],   'gain_daily_ret': [gain_daily_return],
+              'day_gain'   : [day_gain],   
+              'gain_daily_ret': [gain_daily_return],
               'min_loss'   : [min_loss],   'min_pct_loss': [min_pct_loss],
               'max_loss'   : [max_loss],   'max_pct_gain':  [max_pct_loss],
               'mean_loss'  : [mean_loss],  'std_loss': [std_loss], 
               'cnt_loss'   : [cnt_loss],   'pct_loss': [pct_loss],
-              'day_loss'   : [day_loss],   'loss_daily_ret': [loss_daily_return],
+              'day_loss'   : [day_loss],   
+              'loss_daily_ret': [loss_daily_return],
               'day_zero'   : [day_zero],   'zero_cnt'  : [zero_cnt],
               'total_buy'  : [total_buy],  'total_sell': [total_sell], 
               'total_days' : [total_days], 'total_cnt' : [total_cnt],
@@ -153,18 +163,22 @@ def calc_stats(trades_df):
 
     cols = ['ticker', 
             'min_gain',  'min_pct_gain',  'max_gain',  'max_pct_gain',
-            'mean_gain', 'std_gain', 'cnt_gain',  'pct_gain', 'day_gain', 'gain_daily_ret',
+            'mean_gain', 'std_gain', 'cnt_gain',  'pct_gain', 'day_gain', 
+            'gain_daily_ret',
             'min_loss',  'min_pct_loss', 'max_loss', 'max_pct_loss',
-            'mean_loss', 'std_loss', 'cnt_loss',  'pct_loss', 'day_loss', 'loss_daily_ret',
+            'mean_loss', 'std_loss', 'cnt_loss',  'pct_loss', 'day_loss', 
+            'loss_daily_ret',
             'day_zero',  'zero_cnt',  
-            'total_buy', 'total_sell', 'total_days', 'total_cnt', 'total_pct', 'daily_ret',
-            'pct_desired'
+            'total_buy', 'total_sell', 'total_days', 'total_cnt', 'total_pct', 
+            'daily_ret', 'pct_desired'
         ]
     ticker_stats_df = pd.DataFrame(columns=cols)
 
     for t in tqdm(tickers):
         gc.collect()
-        ticker_stats_df = pd.concat( [ticker_stats_df, calc_stats_ticker(trades_df, t)], sort=False )
+        ticker_stats_df = pd.concat( [ticker_stats_df, 
+                                      calc_stats_ticker(trades_df, t)], 
+                                      sort=False )
         #log('')
         #log(f"ticker_stats_df after adding {t}")
         #log(f'\n{ticker_stats_df}')
@@ -186,11 +200,14 @@ def post_processing(ticker_stats_df):
     ticker_stats_df.total_cnt  = ticker_stats_df.total_cnt.astype(int)
 
     # Calculate gain ratio
-    ticker_stats_df['gain_ratio'] = ticker_stats_df.cnt_gain / (ticker_stats_df.total_cnt)
+    ticker_stats_df['gain_ratio'] = ticker_stats_df.cnt_gain \
+                                  / (ticker_stats_df.total_cnt)
 
     # Calculate expected daily returns for gains and losses
-    ticker_stats_df['e_gain_daily_ret'] = ticker_stats_df.gain_daily_ret * ticker_stats_df.gain_ratio
-    ticker_stats_df['e_loss_daily_ret'] = ticker_stats_df.gain_daily_ret * (1-ticker_stats_df.gain_ratio)
+    ticker_stats_df['e_gain_daily_ret'] = ticker_stats_df.gain_daily_ret \
+                                        * ticker_stats_df.gain_ratio
+    ticker_stats_df['e_loss_daily_ret'] = ticker_stats_df.gain_daily_ret \
+                                        * (1-ticker_stats_df.gain_ratio)
 
     log("ticker_stats_df.describe=")
     log(f'\n{ticker_stats_df.describe()}')
@@ -198,7 +215,7 @@ def post_processing(ticker_stats_df):
     return ticker_stats_df
 
 def heuristic(ticker_stats_df, trades_df):
-    idx = (ticker_stats_df.daily_ret > 0) & (ticker_stats_df.gain_ratio > 0.7) \
+    idx = (ticker_stats_df.daily_ret >0) & (ticker_stats_df.gain_ratio > 0.7) \
         & (ticker_stats_df.pct_gain > abs(ticker_stats_df.pct_loss))
     good_tickers = list(set(ticker_stats_df.ticker.loc[idx].to_list()))
     log(f'len(good_tickers)={len(good_tickers)}')
@@ -221,12 +238,13 @@ def heuristic(ticker_stats_df, trades_df):
     # temp_df    
 
 def calc_n_print_ratios(trades_df):
-    gain_sum, gain_cnt = trades_df['gain'].loc[trades_df.gain >  0].agg(['sum', 'count'])
-    loss_sum, loss_cnt = trades_df['gain'].loc[trades_df.gain <  0].agg(['sum', 'count'])
+    aggs = ['sum', 'count']
+    gain_sum, gain_cnt = trades_df['gain'].loc[trades_df.gain > 0].agg(aggs)
+    loss_sum, loss_cnt = trades_df['gain'].loc[trades_df.gain < 0].agg(aggs)
 
     idx = trades_df.gain == 0
     if len(trades_df.loc[idx]) > 0:
-       zero_sum, zero_cnt = trades_df['gain'].loc[trades_df.gain == 0].agg(['sum', 'count'])
+       zero_sum, zero_cnt = trades_df['gain'].loc[trades_df.gain==0].agg(aggs)
     else:
        zero_sum = zero_cnt = 0
 
