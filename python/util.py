@@ -131,3 +131,7 @@ def build_ticker_list():
     log("")
 
     return tickers
+
+
+def empty_dataframe(cols):
+    return pd.DataFrame(columns=cols)

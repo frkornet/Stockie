@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from symbols import TRADE_FNM, STATS_FNM, LOGPATH
+from symbols import TRAIN_TRADE_FNM, STATS_FNM, LOGPATH, PICPATH
 from util    import open_logfile, log, is_holiday, get_current_day_and_time
 from tqdm    import tqdm
 
@@ -10,7 +10,7 @@ import gc; gc.enable()
 import warnings; warnings.filterwarnings("ignore")
 
 def read_possible_trades():
-    possible_trades_df = pd.read_csv(TRADE_FNM)
+    possible_trades_df = pd.read_csv(TRAIN_TRADE_FNM)
     return possible_trades_df
 
 def print_possible_trades_stats(trades_df):
@@ -38,7 +38,7 @@ def print_possible_trades_stats(trades_df):
     axs[2].set_title('Possible trades: trading days vs percentage'
                      ' gain (test set)')
 
-    plt.savefig(f'{LOGPATH}stats_scatter.png')
+    plt.savefig(f'{PICPATH}stats_scatter.png')
 
 
 def calc_ticker_stats(ticker_df):
@@ -282,7 +282,7 @@ def good_subset_posible_trades(good_tickers, possible_trades_df):
 
     return good_df
 
-def main():
+def stats_main():
     trades_df = read_possible_trades()
     #print_possible_trades_stats(trades_df)
     ticker_stats_df = calc_stats(trades_df)
@@ -309,4 +309,4 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        main()
+        stats_main()

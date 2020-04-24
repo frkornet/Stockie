@@ -5,7 +5,8 @@ import gc; gc.collect()
 from tqdm                    import tqdm
 from util                    import print_ticker_heading, get_stock_n_smooth, smooth, log, \
                                     get_current_day_and_time, open_logfile, \
-                                    is_holiday, exclude_tickers, build_ticker_list
+                                    is_holiday, exclude_tickers, build_ticker_list, \
+                                    empty_dataframe
 from scipy.signal            import argrelmin, argrelmax
 
 from sklearn.linear_model    import LogisticRegression
@@ -18,9 +19,10 @@ from sklearn.model_selection import cross_val_score
 from sklearn.impute          import SimpleImputer
 
 from symbols                 import BUY, SELL, STOCKS_FNM, EXCLUDE_FNM, \
-                                    TRADE_FNM, BUY_FNM, LOGPATH, EXCLUDE_SET, \
-                                    TRADE_PERIOD, TRADE_THRESHOLD, \
-                                    TRADE_DAILY_RET
+                                    FULL_TRADE_FNM, TRAIN_TRADE_FNM, \
+                                    TEST_TRADE_FNM, BUY_FNM, LOGPATH, \
+                                    EXCLUDE_SET, TRADE_PERIOD, \
+                                    TRADE_THRESHOLD, TRADE_DAILY_RET
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -125,8 +127,8 @@ def get_signals(hist, target, threshold):
     pipe = make_pipeline(binner, objectify, encoder, imputer, clf)
     pipe.fit(X_train, y_train.values)
 
-    signals = (pipe.predict_proba(X_test)  > threshold).astype(int)[:,1]
-    return signals
+    test_signals = (pipe.predict_proba(X_test)  > threshold).astype(int)[:,1]
+    return y_train.values, test_signals
 
 def merge_buy_n_sell_signals(buy_signals, sell_signals):
     """
@@ -251,7 +253,7 @@ def ticker_trades(ticker, verbose):
 
     success, hist = get_stock_n_smooth(ticker, TRADE_PERIOD)
     if success == False:
-        return False, None, None
+        return False, None, None, None
 
     try:
         # get the buy signals
@@ -259,28 +261,36 @@ def ticker_trades(ticker, verbose):
         hist[target] = 0
         min_ids = argrelmin(hist.smooth.values)[0].tolist()
         hist[target].iloc[min_ids] = 1        
-        buy_signals = get_signals(hist, target, TRADE_THRESHOLD)
+        train_buy_signals, test_buy_signals = \
+            get_signals(hist, target, TRADE_THRESHOLD)
 
         # get the sell signals
         step = "get sell signals"
         hist[target] = 0
         max_ids = argrelmax(hist.smooth.values)[0].tolist()
         hist[target].iloc[max_ids] = 1
-        sell_signals = get_signals(hist, target, TRADE_THRESHOLD)
+        train_sell_signals, test_sell_signals = \
+            get_signals(hist, target, TRADE_THRESHOLD)
         
         # merge the buy and sell signals
         step = "merge buy and sell signals"
-        buy_n_sell = merge_buy_n_sell_signals(buy_signals, sell_signals)
+        train_buy_n_sell = merge_buy_n_sell_signals(train_buy_signals, 
+                                                    train_sell_signals)
+        test_buy_n_sell  = merge_buy_n_sell_signals(test_buy_signals, 
+                                                    test_sell_signals)
         
         # extract trades
         step = "extract trades"
-        ticker_df, buy_df = extract_trades(hist, buy_n_sell, ticker, verbose)
-        return True, ticker_df, buy_df
+        train_ticker_df,   _   = extract_trades(hist, train_buy_n_sell, 
+                                                ticker, verbose)
+        test_ticker_df, buy_df = extract_trades(hist, test_buy_n_sell, 
+                                                ticker, verbose)
+        return True, train_ticker_df, test_ticker_df, buy_df
 
     except:
         log(f"Failed to get possible trades for {ticker}")
         log(f"step={step}")
-        return False, None, None
+        return False, None, None, None
      
 def get_possible_trades(tickers, threshold, period, verbose):
     """
@@ -304,28 +314,37 @@ def get_possible_trades(tickers, threshold, period, verbose):
     
     cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
             'trading_days', 'daily_return', 'ticker' ]
-    possible_trades_df = pd.DataFrame(columns=cols)
+    train_possible_trades_df = empty_dataframe(cols)
+    test_possible_trades_df = empty_dataframe(cols)
 
     cols=['ticker', 'buy_date', 'buy_close']
-    buy_opportunities_df = pd.DataFrame(columns=cols)
+    buy_opportunities_df = empty_dataframe(cols)
     
     #print('Determining possible trades...\n')
     for ticker in tqdm(tickers, desc="possible trades: "):
-        success, ticker_df, buy_df = ticker_trades(ticker, verbose)
+        success, train_ticker_df, test_ticker_df, buy_df = \
+            ticker_trades(ticker, verbose)
         if success == True:
-            possible_trades_df = pd.concat([possible_trades_df, ticker_df])
+            train_possible_trades_df = pd.concat([train_possible_trades_df, 
+                                                  train_ticker_df])
+            test_possible_trades_df = pd.concat([test_possible_trades_df, 
+                                                 test_ticker_df])
             buy_opportunities_df = pd.concat([buy_opportunities_df, buy_df])
 
-    possible_trades_df.trading_days = possible_trades_df.trading_days.astype(int)
-    return possible_trades_df, buy_opportunities_df
+    train_possible_trades_df.trading_days = \
+        train_possible_trades_df.trading_days.astype(int)
+    test_possible_trades_df.trading_days  = \
+        test_possible_trades_df.trading_days.astype(int)
+    return train_possible_trades_df, test_possible_trades_df, \
+           buy_opportunities_df
 
 def call_get_possible_trades(tickers):
     log("Calling get_possible_trades...")
-    possible_trades_df, buy_opportunities_df \
+    train_possible_trades_df, test_possible_trades_df,  buy_opportunities_df \
        = get_possible_trades(tickers, 0.5, TRADE_PERIOD, False)
     log("Finished get_possible_trades")
     log("")
-    return possible_trades_df, buy_opportunities_df
+    return train_possible_trades_df, test_possible_trades_df, buy_opportunities_df
 
 def drop_suspicious_trades(possible_trades_df):
     log("Checking for suspicious daily return trades...")
@@ -338,21 +357,37 @@ def drop_suspicious_trades(possible_trades_df):
     return possible_trades_df
 
 
-def save_files(possible_trades_df, buy_opportunities_df):
-    log(f"Saving possible trades to {TRADE_FNM} ({len(possible_trades_df)})")
-    possible_trades_df.to_csv(TRADE_FNM, index=False)
+def save_files(train_possible_trades_df, test_possible_trades_df, buy_opportunities_df):
+
+    possible_trades_df = pd.concat([train_possible_trades_df, 
+                                    test_possible_trades_df])
+    log(f'Saving all possible trades to {FULL_TRADE_FNM}'
+        f' ({len(possible_trades_df)})')
+    possible_trades_df.to_csv(FULL_TRADE_FNM, index=False)
+
+    log(f'Saving train possible trades to {TRAIN_TRADE_FNM}'
+        f' ({len(train_possible_trades_df)})')
+    train_possible_trades_df.to_csv(TRAIN_TRADE_FNM, index=False)
+
+    log(f'Saving test possible trades to {TEST_TRADE_FNM}'
+        f' ({len(test_possible_trades_df)})')
+    test_possible_trades_df.to_csv(TEST_TRADE_FNM, index=False)
+
     log(f"Saving buy opportunities to {BUY_FNM} ({len(buy_opportunities_df)})")
     buy_opportunities_df.to_csv(BUY_FNM, index=False)
     log('')
 
-def main():
+def trade_main():
     log("Generating possible trades")
     log('')
 
     tickers = build_ticker_list()
-    possible_trades_df, buy_opportunities_df = call_get_possible_trades(tickers)
-    possible_trades_df = drop_suspicious_trades(possible_trades_df)
-    save_files(possible_trades_df, buy_opportunities_df)
+    train_possible_trades_df, test_possible_trades_df, buy_opportunities_df \
+        = call_get_possible_trades(tickers)
+    train_possible_trades_df = drop_suspicious_trades(train_possible_trades_df)
+    test_possible_trades_df = drop_suspicious_trades(test_possible_trades_df)
+    save_files(train_possible_trades_df, test_possible_trades_df, \
+               buy_opportunities_df)
     log('Done.')
 
 if __name__ == "__main__":
@@ -365,4 +400,4 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        main()
+        trade_main()

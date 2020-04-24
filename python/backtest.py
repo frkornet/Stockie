@@ -3,7 +3,8 @@
 #
 # Initial version of backtesting module. It allows you to backtest as well as 
 # to get buy and sell recommendations (still to be implemented as part of final
-# project). The backtest_xxx.ipynb notebooks depend on the functionality provided
+# project). The backtest_xxx.ipynb notebooks depend on the functionality 
+# provided
 # by this module.
 #
 # Author:   Frank Kornet
@@ -20,11 +21,13 @@ from tqdm                    import tqdm
 from time                    import sleep
 from datetime                import datetime, timedelta
 
-from util                    import open_logfile, log, get_stock, build_ticker_list, \
-                                    get_current_day_and_time, is_holiday, add_days_to_date
+from util                    import open_logfile, log, get_stock, \
+                                    build_ticker_list, is_holiday, \
+                                    get_current_day_and_time, add_days_to_date
 from pnl                     import Capital, PnL
 from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
-                                    STOP_LOSS, STATS_FNM, TRADE_FNM, BUY_FNM
+                                    STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
+                                    BUY_FNM
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -71,7 +74,7 @@ class Backtester(object):
         log(f"tickers={self.tickers} len(tickers)={len(self.tickers)}\n\n")
 
         # Read possible trades and buy opportunities
-        self.possible_trades_df = pd.read_csv(TRADE_FNM)
+        self.possible_trades_df = pd.read_csv(TEST_TRADE_FNM)
         self.buy_opportunities_df = pd.read_csv(BUY_FNM)
 
         # Augment buy recommendations
@@ -290,7 +293,8 @@ class Backtester(object):
     def main_back_test_loop(self):
 
         for self.trading_day, self.trading_date in \
-            enumerate(tqdm(self.backtest_trading_dates, desc="simulate trades: ")):
+            enumerate(tqdm(self.backtest_trading_dates, 
+                           desc="simulate trades: ")):
 
             # if str(self.trading_date)[:10] == '2020-04-20':
             #     log('')
@@ -304,31 +308,41 @@ class Backtester(object):
     def make_buy_recommendations(self):
 
         cols = ['ticker', 'trading_days', 'gain_pct', 'daily_return']
-        mean_dict = self.possible_trades_df[cols].groupby('ticker').agg(['mean']).to_dict()
-        mean_df = self.possible_trades_df[cols].groupby('ticker').agg(['mean']).reset_index()
+        mean_dict = self.possible_trades_df[cols].groupby('ticker')\
+            .agg(['mean']).to_dict()
+        mean_df = self.possible_trades_df[cols].groupby('ticker') \
+            .agg(['mean']).reset_index()
         mean_df.columns=['ticker', 'trading_days', 'gain_pct', 'daily_return']
-        self.buy_opportunities_df = pd.merge(self.buy_opportunities_df, mean_df, how='inner')
+        self.buy_opportunities_df = pd.merge(self.buy_opportunities_df, 
+                                             mean_df, how='inner')
 
         # Get today's and yesterday's date
         today = datetime.today()
         yesterday = today - timedelta(1)
-        today, yesterday = today.strftime('%Y-%m-%d'), yesterday.strftime('%Y-%m-%d')
+        today     = today.strftime('%Y-%m-%d')
+        yesterday = yesterday.strftime('%Y-%m-%d')
 
-        buy_opportunities_df = pd.merge(buy_opportunities_df, ticker_stats_df, how='inner')
+        buy_opportunities_df = pd.merge(buy_opportunities_df, ticker_stats_df, 
+                                        how='inner')
 
         log('', True)
         log("Today's buying recommendations:\n", True)
-        idx = (buy_opportunities_df.buy_date == today) #& (buy_opportunities_df.gain_pct > 0)
-        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, ascending=False)[0:self.max_stocks]
-        cols = ['ticker', 'buy_date', ret_col, 'gain_ratio', 'e_gain_daily_ret', 'e_loss_daily_ret',
+        idx = (buy_opportunities_df.buy_date == today) 
+        #& (buy_opportunities_df.gain_pct > 0)
+        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, 
+             ascending=False)[0:self.max_stocks]
+        cols = ['ticker', 'buy_date', ret_col, 'gain_ratio', 
+                'e_gain_daily_ret', 'e_loss_daily_ret',
                 'day_gain', 'day_loss', 'day_zero']
         log(df[cols], True)
         log('', True)
 
         log('', True)
         log("Yesterday's buying recommendations:\n", True)
-        idx = (buy_opportunities_df.buy_date == yesterday) & (buy_opportunities_df.gain_pct > 0)
-        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, ascending=False)[0:self.max_stocks]
+        idx = (buy_opportunities_df.buy_date == yesterday) &\
+              (buy_opportunities_df.gain_pct > 0)
+        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, 
+             ascending=False)[0:self.max_stocks]
         log(df[cols], True)
         log('', True)
 
@@ -343,7 +357,7 @@ class Backtester(object):
         idx                  = self.myPnL.df.action=='SELL'
         sell_df              = self.myPnL.df[idx].copy()
         sell_df['gain']      = (sell_df.close_amount - sell_df.orig_amount)
-        sell_df['gain_pct']  = round((sell_df.gain / sell_df.orig_amount)*100, 2)
+        sell_df['gain_pct']  = round((sell_df.gain/sell_df.orig_amount)*100, 2)
         sell_df['daily_ret'] = ( (  (1 + sell_df.gain_pct/100) \
                                 ** (1/ sell_df.days_in_trade) ) - 1 ) * 100
 
@@ -364,8 +378,11 @@ class Backtester(object):
         log('')
 
     def scatter_plot(self, df, day_col, fnm):
-        df.plot.scatter(x=day_col, y='gain_pct', figsize=(18,8))
-        plt.savefig(fnm)
+        if len(df) > 0:
+            df.plot.scatter(x=day_col, y='gain_pct', figsize=(18,8))
+            plt.savefig(fnm)
+        else:
+            log(f'Data frame is empty: unable to scatter plot!')
 
     def sell_df_scatter_plot(self, threshold):
         log('')
@@ -412,7 +429,7 @@ class Backtester(object):
 
 
 
-def main():
+def backtest_main():
     bt = Backtester()
 
     capital_dict = {}
@@ -479,4 +496,4 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        main()
+        backtest_main()

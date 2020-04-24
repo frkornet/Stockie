@@ -23,7 +23,8 @@ class Capital(object):
         assert in_use  >= 0, "in_use needs to be zero or greater"
         assert free    >= 0, "free needs to be zero or greater"
         
-        assert abs(capital - in_use - free) < TOLERANCE, "capital and in_use + free deviating too much!"
+        assert abs(capital - in_use - free) < TOLERANCE, \
+            "capital and in_use + free deviating too much!"
         
         close_dict = { 'date'    : [close_date], 
                        'capital' : [capital],
@@ -86,18 +87,23 @@ class PnL(object):
         
     def buy_stock (self, ticker, buy_date, sell_date, amount):
         """
-        Buy a stock on a specifid day and store it in the actual trades dataframe (i.e. df).
+        Buy a stock on a specifid day and store it in the actual trades 
+        dataframe (i.e. df).
         
-        The active investments are recorded in the invested dictionary. The historical
-        stock data is stored in invested[ticker].
+        The active investments are recorded in the invested dictionary. 
+        The historical stock data is stored in invested[ticker].
 
         Returns nothing.
         """
-        
-        assert amount > 0,                      f"amount ({amount}) needs to be greater than zero!"
-        assert ticker not in self.invested,     f"already own shares in {ticker}!"
-        assert len(self.invested) < self.max_stocks, f"already own maximum # stocks ({self.max_stocks})!"
-        assert abs(self.capital - self.in_use - self.free) < TOLERANCE, "capital and in_use + free deviating too much!"
+
+        assert amount > 0, \
+            f"amount ({amount}) needs to be greater than zero!"
+        assert ticker not in self.invested, \
+            f"already own shares in {ticker}!"
+        assert len(self.invested) < self.max_stocks, \
+            f"already own maximum # stocks ({self.max_stocks})!"
+        assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
+            "capital and in_use + free deviating too much!"
         
         # Make sure we have the money to buy stock
         if amount > self.free:
@@ -105,10 +111,12 @@ class PnL(object):
                 amount=self.free
                 log(f"you do not have {amount} and setting amount to {self.free}")
             else:
-                log(f"you do not have any money left to buy ({self.free})! Not buying...")
+                log(f'you do not have any money left to buy ({self.free})!'
+                    f' Not buying...')
                 return
 
-        # Retrieve the historical data for stock ticker and save it while we're invested
+        # Retrieve the historical data for stock ticker and save it 
+        # while we're invested
         asset  = yf.Ticker(ticker)
         hist   = asset.history(start=self.start, end=self.end_plus_1)
         if len(hist) == 0:
@@ -156,36 +164,52 @@ class PnL(object):
      
     def sell_stock (self, ticker, sell_date):
         """
-        Sell stock on specified date. Also, remove the ticker from invested after
-        the position has been closed. 
+        Sell stock on specified date. Also, remove the ticker from invested 
+        after the position has been closed. 
 
         Returns nothing.
         """
-
+        
         assert self.capital >= 0, "capital needs to be zero or greater"
         assert self.in_use  >= 0, "in_use needs to be zero or greater"
         assert self.free    >= 0, "free needs to be zero or greater"        
         assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
                "capital and in_use + free deviating too much!"
 
-        # Return if we do not own the stock (may be due to a forced stop-loss sales)
+        # Return if we do not own the stock (may be due to a forced 
+        # stop-loss sales)
         if ticker not in self.invested:
             return 
         
         # Get the latest close_amount for ticker and no_shares owned
-        idx           = (self.df.ticker == ticker) & (self.df.invested==1)
-        no_shares     = float(self.df['no_shares'].loc[idx])
-        close_amount  = float(self.df['close_amount'].loc[idx])
-        orig_amount   = float(self.df['orig_amount'].loc[idx])
-        stop_loss     = float(self.df['stop_loss'].loc[idx])
-        days_in_trade = int(self.df['days_in_trade'].loc[idx])
-        self.df.loc[idx, 'invested'] = 0
+        tidx    = (self.df.ticker == ticker) & (self.df.invested==1)
+        len_tidx = len(self.df[tidx])
+        if len_tidx != 1:
+            log(f'pnl.sell_stock(): ticker={ticker}')
+            log(f'len_tidx={len_tidx}')
+            log(f'\n{self.df[tidx]}')
+            tidx =  (self.df.ticker == ticker)
+            log(f'All ticker = {ticker} related rows...')
+            log(f'\n{self.df[tidx]}')
+            return
+
+        no_shares     = float(self.df['no_shares'].loc[tidx])
+        close_amount  = float(self.df['close_amount'].loc[tidx])
+        orig_amount   = float(self.df['orig_amount'].loc[tidx])
+        stop_loss     = float(self.df['stop_loss'].loc[tidx])
+        days_in_trade = int(self.df['days_in_trade'].loc[tidx])
         
         # Calculate how much the sell will earn
-        idx = self.invested[ticker].index == sell_date
-        if len(self.invested[ticker].Close.loc[idx]) != 1:
+        sidx = self.invested[ticker].index == sell_date
+        len_sidx = len(self.invested[ticker].Close.loc[sidx])
+        if len_sidx != 1:
+            log(f'pnl.sell_stock(): ticker={ticker}')
+            log(f'len_sidx={len_sidx}')
+            log(f'\n{self.invested[ticker].loc[sidx]}')
             return
-        share_price   = float(self.invested[ticker].Close.loc[idx])
+        
+        self.df.loc[tidx, 'invested'] = 0
+        share_price   = float(self.invested[ticker].Close.loc[sidx])
         today_amount  = no_shares * share_price
         delta_amount  = today_amount - close_amount
         delta_pct     = (delta_amount / close_amount) * 100
@@ -237,33 +261,47 @@ class PnL(object):
         
     def day_close(self, close_date):
         """
-        Day end close. Updates the value of the stocks actively invested in and
-        updates the variables capital, in_use, and free. After the value of each
-        position has been updated, store capital, in_use, and free.
+        Day end close. Updates the value of the stocks actively invested in 
+        and updates the variables capital, in_use, and free. After the value 
+        of each position has been updated, store capital, in_use, and free.
 
         It also has a safety net to print a warning if the value of an open 
         position changes by more than ten percent. This is put in place as 
-        occasionally the data returned by yfinance is incorrect. This will alert
-        us that this may be happening. 
+        occasionally the data returned by yfinance is incorrect. This will 
+        alert us that this may be happening. 
 
         Returns nothing.
         """
+        try:
+            tickers = list(self.invested.keys())
+        except:
+            log(self.invested)
+            log(self.invested.keys())
+            log(len(self.invested.keys()))
 
-        tickers = list(self.invested.keys())
         for ticker in tickers:
-            
+
             # Get the latest close_amount for ticker and no_shares owned
-            df_idx        = (self.df.ticker == ticker) & (self.df.invested==1)
-            # if len(self.df.loc[df_idx]) == 0:
-            #     continue
+            df_idx  = (self.df.ticker == ticker) & (self.df.invested==1)
+            len_idx = len(self.df.loc[df_idx])
+            if len_idx == 0:
+                log(f'myPnL.day_close():', True)
+                log(f'Unable to find row for ticker {ticker}', True)
+                log(f'len_idx={len_idx}', True)
+                idx = self.df.ticker == ticker
+                log(f'\n{self.df.loc[idx]}')
+                continue
 
             log(f"{ticker}:\n {self.df.loc[df_idx]}")
-            no_shares     = float(self.df['no_shares'].loc[df_idx])
-            close_amount  = float(self.df['close_amount'].loc[df_idx])
-            orig_amount   = float(self.df['orig_amount'].loc[df_idx])
-            stop_loss     = float(self.df['stop_loss'].loc[df_idx])
-            days_in_trade = int(self.df['days_in_trade'].loc[df_idx])
-            self.df.loc[df_idx, 'invested'] = 0
+            try:
+                no_shares     = float(self.df['no_shares'].loc[df_idx])
+                close_amount  = float(self.df['close_amount'].loc[df_idx])
+                orig_amount   = float(self.df['orig_amount'].loc[df_idx])
+                stop_loss     = float(self.df['stop_loss'].loc[df_idx])
+                days_in_trade = int(self.df['days_in_trade'].loc[df_idx])
+            except:
+                log(f'failed to calculate latest info')
+
 
             # Calculate how much the sell will earn
             hist_idx = self.invested[ticker].index == close_date
@@ -273,7 +311,8 @@ class PnL(object):
 
             # Take last row in set if more than one rows are found...
             if hist_len > 1:
-                share_price = float(self.invested[ticker].Close.loc[hist_idx].iloc[-1])
+                share_price = \
+                    float(self.invested[ticker].Close.loc[hist_idx].iloc[-1])
             else:
                 share_price = float(self.invested[ticker].Close.loc[hist_idx])
 
@@ -289,14 +328,18 @@ class PnL(object):
                 self.sell_stock(ticker, close_date)
                 continue
 
-            # Report a suspicious high change per stock/day. Threshold for now set at 10%
-            # Allows us to see what other stocks may have issues than just SBT...
+            # Report a suspicious high change per stock/day. Threshold for now 
+            # set at 10%. Allows us to see what other stocks may have issues 
+            # than just SBT...
             if abs(delta_amount / self.capital) > 0.1:
                 log('')
                 log('********************')
-                log(f'*** WARNING      *** capital changed by more than 10% for {ticker} on {close_date}!')
-                log(f'***              *** no_shares={no_shares} share_price={share_price} today_amount={today_amount}')
-                log(f'***              *** orig_amount={orig_amount} close_amount={close_amount} delta_amount={delta_amount}')
+                log(f'*** WARNING      *** capital changed by more than 10%'
+                    f' for {ticker} on {close_date}!')
+                log(f'***              *** no_shares={no_shares}'
+                    f' share_price={share_price} today_amount={today_amount}')
+                log(f'***              *** orig_amount={orig_amount} '
+                    f'close_amount={close_amount} delta_amount={delta_amount}')
                 log('********************')
                 log('')
             
@@ -305,6 +348,8 @@ class PnL(object):
             self.in_use   = self.in_use  + delta_amount
             tol = abs(self.capital - self.in_use - self.free)
             assert tol < TOLERANCE, "tol deviating too much!"
+
+            self.df.loc[df_idx, 'invested'] = 0
 
             close_dict = {'date'        : [close_date],
                          'ticker'       : [ticker],
@@ -323,4 +368,5 @@ class PnL(object):
             self.df = pd.concat([self.df, close_df])
             
         # Store overall end day result in myCapital
-        self.myCapital.day_close(close_date, self.capital, self.in_use, self.free)
+        self.myCapital.day_close(close_date, self.capital, self.in_use, 
+                                 self.free)

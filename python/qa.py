@@ -20,7 +20,7 @@ def qa_stocks():
 
     tickers = sorted(list(stocks.TICKER))
     for ticker in tqdm(tickers):
-        success, _, _ = ticker_trades(ticker, False)
+        success, _, _, _ = ticker_trades(ticker, False)
         gc.collect()
 
         if success == False:
@@ -56,7 +56,7 @@ def qa_run_set(times):
     return complete_set   
 
 
-def main():
+def qa_main():
     complete_exclude_set = qa_run_set(QA_SET)
     log('', True)
     log('Complete exclude set:', True)
@@ -88,6 +88,6 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        main()
+        qa_main()
 
  
