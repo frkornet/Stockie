@@ -68,7 +68,7 @@ def smooth(hist, ticker):
         #print(f"Failed to smooth prices for {ticker}!")
         return False, hist
 
-def get_stock(ticker, times, period):
+def get_stock_period(ticker, times, period):
     """
     Try up to `times` to get data for ticker from yfinance. After
     each failure sleep for 5 seconds before trying again.
@@ -87,10 +87,28 @@ def get_stock(ticker, times, period):
     return False, hist
 
 def get_stock_n_smooth(ticker, period):
-    success, hist = get_stock(ticker, 2, period)
+    success, hist = get_stock_period(ticker, 2, period)
     if success == False:
         return False, hist
     return smooth(hist, ticker)
+
+def get_stock_start(ticker, times, start, end):
+    """
+    Try up to `times` to get data for ticker from yfinance. After
+    each failure sleep for 5 seconds before trying again.
+    """
+    for i in range(times):
+        try:
+            asset  = yf.Ticker(ticker)
+            hist   = asset.history(start=start, end=end)
+            return True, hist
+        except:
+            print(f"Failed to retrieve stock data for {ticker} (attempt={i+1})")
+            sleep(5)
+            continue
+    
+    hist=pd.DataFrame(columns=['Open', 'Close', 'High', 'Low'])
+    return False, hist
 
 def print_ticker_heading(ticker):
     """

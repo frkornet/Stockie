@@ -21,7 +21,7 @@ from tqdm                    import tqdm
 from time                    import sleep
 from datetime                import datetime, timedelta
 
-from util                    import open_logfile, log, get_stock, \
+from util                    import open_logfile, log, get_stock_period, \
                                     build_ticker_list, is_holiday, \
                                     get_current_day_and_time, add_days_to_date
 from pnl                     import Capital, PnL
@@ -89,7 +89,7 @@ class Backtester(object):
 
         # Pull down MSFT stock for period and use that as basis for determining
         # the stock market trading days
-        success, hist = get_stock('MSFT', 2, "max")
+        success, hist = get_stock_period('MSFT', 2, "max")
         assert success == True, 'Failed to retrieve MSFT data'
         idx = (hist.index >= self.start_date) & (hist.index <= self.end_date)
         self.backtest_trading_dates = hist.loc[idx].index.to_list()

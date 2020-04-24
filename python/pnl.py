@@ -1,6 +1,6 @@
 import pandas                as pd
 import numpy                 as np
-from   util                  import log, add_days_to_date
+from   util                  import log, add_days_to_date, get_stock_start
 from   symbols               import BUY, SELL, TOLERANCE, STOP_LOSS
 import yfinance              as yf
 import gc; gc.enable()
@@ -85,7 +85,82 @@ class PnL(object):
         self.in_use     = in_use
         self.free       = free
         self.max_stocks = max_stocks
+    
+    def validate_buy(self):
+        msg = f"amount ({self.amount}) needs to be greater than zero!"
+        assert self.amount > 0, msg
         
+        msg = f"already own shares in {self.ticker}!"
+        assert self.ticker not in self.invested, msg
+        
+        msg = f"already own maximum # stocks ({self.max_stocks})!"
+        assert len(self.invested) < self.max_stocks, msg
+            
+        tol = abs(self.capital - self.in_use - self.free)
+        assert tol < TOLERANCE, f"tolerance {tol} deviating too much!"
+
+    def check_sufficient_amount(self):
+        if self.amount > self.free:
+            if self.free > 0:
+                self.amount=self.free     # clipping amount
+            else:
+                return False                   # not buying
+        return True
+
+    def buy_stock_init(self, ticker, buy_date, sell_date, amount):
+        self.ticker = ticker
+        self.buy_date = buy_date
+        self.sell_date = sell_date
+        self.amount = amount
+        self.validate_buy()
+        return self.check_sufficient_amount()
+
+    def get_hist(self):
+        s, e = self.start, self.end_plus_1
+        success, hist = get_stock_start(self.ticker, 2, s, e)
+        if success == False:
+            log(f'Failed to retrieve data from yf ({ticker}) to buy stock')
+            return False
+
+        idx = hist.index == self.buy_date
+        if len(hist.Close.loc[idx]) != 1:
+            log(f"Unable to retrieve {buy_date} for {ticker}")
+            return False
+        
+        self.hist = hist
+        return True
+    
+    def calc_no_shares_to_buy(self):
+        self.invested[self.ticker] = self.hist.copy()
+        idx = self.invested[self.ticker].index == self.buy_date
+        self.share_price = float(self.invested[self.ticker].Close.loc[idx])
+        self.no_shares = self.amount / self.share_price
+        self.stop_loss = self.share_price * 0.9
+
+    def update_buy_amount(self):
+        self.free   = self.free - self.amount
+        self.in_use = self.in_use + self.amount
+        tol = abs(self.capital - self.in_use - self.free)
+        assert tol < TOLERANCE, f"tolerance ({tol}) deviating too much!"
+
+    def save_buy(self):
+        buy_dict = {'date'         : [self.buy_date],
+                    'ticker'       : [self.ticker],
+                    'action'       : ['BUY'],
+                    'orig_amount'  : [self.amount],
+                    'close_amount' : [self.amount],
+                    'no_shares'    : [self.no_shares],
+                    'stop_loss'    : [self.stop_loss],
+                    'daily_gain'   : [0.0],
+                    'daily_pct'    : [0.0],
+                    'days_in_trade': [0],
+                    'invested'     : [1]
+                   }
+        
+        buy_df = pd.DataFrame(buy_dict)
+        self.df = pd.concat([self.df, buy_df])
+        self.df.invested = self.df.invested.astype(int)   
+
     def buy_stock (self, ticker, buy_date, sell_date, amount):
         """
         Buy a stock on a specifid day and store it in the actual trades 
@@ -97,71 +172,15 @@ class PnL(object):
         Returns nothing.
         """
 
-        assert amount > 0, \
-            f"amount ({amount}) needs to be greater than zero!"
-        assert ticker not in self.invested, \
-            f"already own shares in {ticker}!"
-        assert len(self.invested) < self.max_stocks, \
-            f"already own maximum # stocks ({self.max_stocks})!"
-        assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
-            "capital and in_use + free deviating too much!"
-        
-        # Make sure we have the money to buy stock
-        if amount > self.free:
-            if self.free > 0:
-                amount=self.free
-                log(f"you do not have {amount} and setting amount to {self.free}")
-            else:
-                log(f'you do not have any money left to buy ({self.free})!'
-                    f' Not buying...')
-                return
-
-        # Retrieve the historical data for stock ticker and save it 
-        # while we're invested
-        asset  = yf.Ticker(ticker)
-        hist   = asset.history(start=self.start, end=self.end_plus_1)
-        if len(hist) == 0:
-            log(f'Failed to retrieve data from yf ticker={ticker} to buy stock')
-            log('Skipping...')
+        if self.buy_stock_init(ticker, buy_date, sell_date, amount) == False:
             return
 
-        idx = hist.index == buy_date
-        if len(hist.Close.loc[idx]) != 1:
-            log(f"PnL.buy_stock(): Unable to retrieve {buy_date} for {ticker}")
-            log('Skipping...')
+        if self.get_hist() == False:
             return
 
-        # Get share price and calculate how many shares we can buy
-        # Also, set stop loss share price at 10 %
-        self.invested[ticker] = hist.copy()
-        idx = self.invested[ticker].index == buy_date
-        share_price = float(self.invested[ticker].Close.loc[idx])
-        no_shares = amount / share_price
-        stop_loss = share_price * 0.9
-        
-        # Reduce free and increase in_use by amount
-        self.free   = self.free - amount
-        self.in_use = self.in_use + amount
-        assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
-            "capital and in_use + free deviating too much!"
-        
-        # Store the buy action in self.df data frame
-        buy_dict = {'date'         : [buy_date],
-                    'ticker'       : [ticker],
-                    'action'       : ['BUY'],
-                    'orig_amount'  : [amount],
-                    'close_amount' : [amount],
-                    'no_shares'    : [no_shares],
-                    'stop_loss'    : [stop_loss],
-                    'daily_gain'   : [0.0],
-                    'daily_pct'    : [0.0],
-                    'days_in_trade': [0],
-                    'invested'     : [1]
-                   }
-        
-        buy_df = pd.DataFrame(buy_dict)
-        self.df = pd.concat([self.df, buy_df])
-        self.df.invested = self.df.invested.astype(int)
+        self.calc_no_shares_to_buy()
+        self.update_buy_amount()  
+        self.save_buy()
      
     def sell_stock (self, ticker, sell_date):
         """

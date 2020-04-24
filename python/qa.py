@@ -3,8 +3,8 @@ import numpy                 as np
 import gc; gc.collect()
 
 from   tqdm                  import tqdm
-from   util                  import open_logfile, log, get_stock, smooth, \
-                                    get_current_day_and_time, is_holiday
+from   util                  import open_logfile, log, is_holiday, \
+                                    get_current_day_and_time
 from   trade                 import ticker_trades
 from symbols                 import LOGPATH, DATAPATH, STOCKS_FNM, QA_PERIOD, \
                                     YF_TIMES, SLEEP_TIME, QA_SET
@@ -20,7 +20,7 @@ def qa_stocks():
 
     tickers = sorted(list(stocks.TICKER))
     for ticker in tqdm(tickers):
-        success, _, _, _ = ticker_trades(ticker, False)
+        success, _, _ = ticker_trades(ticker, False)
         gc.collect()
 
         if success == False:
@@ -88,6 +88,6 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        qa_main()
+        main()
 
  
