@@ -3,6 +3,7 @@ import numpy                 as np
 from   util                  import log, add_days_to_date
 from   symbols               import BUY, SELL, TOLERANCE, STOP_LOSS
 import yfinance              as yf
+import gc; gc.enable()
 
 class Capital(object):
     """
@@ -210,6 +211,8 @@ class PnL(object):
         
         self.df.loc[tidx, 'invested'] = 0
         share_price   = float(self.invested[ticker].Close.loc[sidx])
+        # Limit loss to stop_loss
+        share_price = max(stop_loss, share_price)
         today_amount  = no_shares * share_price
         delta_amount  = today_amount - close_amount
         delta_pct     = (delta_amount / close_amount) * 100
@@ -258,115 +261,147 @@ class PnL(object):
 
         # Remove stock from invested dictionary
         del self.invested[ticker]
-        
+    
+    def get_latest_index(self, ticker):
+        idx  = (self.df.ticker == ticker) & (self.df.invested==1)
+        len_idx = len(self.df.loc[idx])
+        assert len_idx == 1, f"len_idx must be 1 (={len_idx}"
+        self.idx = idx
+
+    def extract_latest_info(self, ticker):
+        self.get_latest_index(ticker)
+        self.ticker        = ticker
+        self.no_shares     = float(self.df['no_shares'].loc[self.idx])
+        self.close_amount  = float(self.df['close_amount'].loc[self.idx])
+        self.orig_amount   = float(self.df['orig_amount'].loc[self.idx])
+        self.stop_loss     = float(self.df['stop_loss'].loc[self.idx])
+        self.days_in_trade = int(self.df['days_in_trade'].loc[self.idx])
+
+    def get_shareprice(self, ticker):
+        self.extract_latest_info(ticker)
+        hist_idx = self.invested[ticker].index == self.close_date
+        hist_len = len(self.invested[ticker].Close.loc[hist_idx])
+        if hist_len == 0:
+            return False
+
+        # max() is used in case there are multiple rows
+        dividend = float(self.invested[ticker].Dividends.loc[hist_idx].max())
+        share_price = float(self.invested[ticker].Close.loc[hist_idx].max())
+
+        self.dividend = 0
+        self.share_price = share_price
+        if dividend > 0:
+            self.dividend = dividend
+
+        return True
+
+    def calc_delta_amount(self):
+        self.today_amount  = self.no_shares * self.share_price
+        self.delta_amount  = self.today_amount - self.close_amount
+        self.delta_pct     = (self.delta_amount / self.close_amount) * 100
+        self.gain_pct      = ((self.today_amount - self.orig_amount) \
+                           / self.orig_amount) * 100
+
+        if abs(self.delta_amount / self.capital) > 0.1:
+            self.print_warning()
+
+    def print_warning(self):
+        log('')
+        log('********************')
+        log(f'*** WARNING      *** capital changed by more than 10%'
+            f' for {self.ticker} on {self.close_date}!')
+        log(f'***              *** no_shares={self.no_shares} '
+            f'share_price={self.share_price} today_amount={self.today_amount}')
+        log(f'***              *** orig_amount={self.orig_amount} '
+            f'close_amount={self.close_amount} delta_amount={self.delta_amount}')
+        log('********************')
+        log('')
+
+    def update_delta_amount(self):
+        self.capital  = self.capital + self.delta_amount
+        self.in_use   = self.in_use  + self.delta_amount
+        tol = abs(self.capital - self.in_use - self.free)
+        assert tol < TOLERANCE, "tol deviating too much!"
+
+    def add_close_record(self):
+        idx = self.df.ticker == self.ticker
+        self.df.loc[idx, 'invested'] = 0
+
+        close_dict = {'date'       : [self.close_date],
+                    'ticker'       : [self.ticker],
+                    'action'       : ['CLOSE'],
+                    'orig_amount'  : [self.orig_amount],
+                    'close_amount' : [self.today_amount],
+                    'no_shares'    : [self.no_shares],
+                    'stop_loss'    : [self.stop_loss],
+                    'daily_gain'   : [self.delta_amount],
+                    'daily_pct'    : [self.delta_pct],
+                    'days_in_trade': [self.days_in_trade + 1],
+                    'invested'     : [ 1 ]
+                }
+    
+        close_df = pd.DataFrame(close_dict)
+        self.df = pd.concat([self.df, close_df])
+
+    def process_dividend(self):
+        if self.dividend == 0:
+            return
+
+        dividend_amount = self.dividend * self.no_shares
+        self.capital = self.capital + dividend_amount
+        self.free = self.free + dividend_amount
+        tol = abs(self.capital - self.in_use - self.free)
+        assert tol < TOLERANCE, "tol deviating too much!"
+
+    def update_dicts(self):
+        self.no_shares_dict[self.ticker] = self.no_shares
+        self.share_price_dict[self.ticker] = self.share_price
+
+    def day_close_ticker(self, ticker):
+        if self.get_shareprice(ticker) == False: 
+            return
+
+        if self.share_price < self.stop_loss:
+            self.sell_stock(ticker, self.close_date)
+            return
+
+        self.calc_delta_amount()          
+        self.update_delta_amount()
+        self.process_dividend()
+        self.add_close_record()
+        self.update_dicts()
+
+    def init_day_close(self, close_date):
+        self.tickers = list(self.invested.keys())
+        self.close_date = close_date
+        self.no_shares_dict = {}
+        self.share_price_dict = {}
+
+    def is_rebalance_needed(self):
+        max_value = (self.capital / self.max_stocks) * 2
+        tickers = list(self.invested.keys())
+        for t in tickers:
+            value = self.no_shares_dict[t] * self.share_price_dict[t]
+            if value > max_value:
+                return True
+        return False
+
+    def rebalance_if_needed(self):
+        if self.is_rebalance_needed() == True:
+            log(f'*** rebalance needed at {self.close_date}')
+
+
     def day_close(self, close_date):
         """
-        Day end close. Updates the value of the stocks actively invested in 
-        and updates the variables capital, in_use, and free. After the value 
-        of each position has been updated, store capital, in_use, and free.
-
-        It also has a safety net to print a warning if the value of an open 
-        position changes by more than ten percent. This is put in place as 
-        occasionally the data returned by yfinance is incorrect. This will 
-        alert us that this may be happening. 
-
-        Returns nothing.
+        Day end close. 
         """
-        try:
-            tickers = list(self.invested.keys())
-        except:
-            log(self.invested)
-            log(self.invested.keys())
-            log(len(self.invested.keys()))
 
-        for ticker in tickers:
+        gc.collect()
+        self.init_day_close(close_date)
+        for ticker in self.tickers:
+            self.day_close_ticker(ticker)
 
-            # Get the latest close_amount for ticker and no_shares owned
-            df_idx  = (self.df.ticker == ticker) & (self.df.invested==1)
-            len_idx = len(self.df.loc[df_idx])
-            if len_idx == 0:
-                log(f'myPnL.day_close():', True)
-                log(f'Unable to find row for ticker {ticker}', True)
-                log(f'len_idx={len_idx}', True)
-                idx = self.df.ticker == ticker
-                log(f'\n{self.df.loc[idx]}')
-                continue
-
-            log(f"{ticker}:\n {self.df.loc[df_idx]}")
-            try:
-                no_shares     = float(self.df['no_shares'].loc[df_idx])
-                close_amount  = float(self.df['close_amount'].loc[df_idx])
-                orig_amount   = float(self.df['orig_amount'].loc[df_idx])
-                stop_loss     = float(self.df['stop_loss'].loc[df_idx])
-                days_in_trade = int(self.df['days_in_trade'].loc[df_idx])
-            except:
-                log(f'failed to calculate latest info')
-
-
-            # Calculate how much the sell will earn
-            hist_idx = self.invested[ticker].index == close_date
-            hist_len = len(self.invested[ticker].Close.loc[hist_idx])
-            if hist_len == 0:
-                continue
-
-            # Take last row in set if more than one rows are found...
-            if hist_len > 1:
-                share_price = \
-                    float(self.invested[ticker].Close.loc[hist_idx].iloc[-1])
-            else:
-                share_price = float(self.invested[ticker].Close.loc[hist_idx])
-
-            today_amount  = no_shares * share_price
-            delta_amount  = today_amount - close_amount
-            delta_pct     = (delta_amount / close_amount) * 100
-
-            # check if we reached a stop loss condition
-            gain_pct = ((today_amount - orig_amount) / orig_amount) * 100
-            if share_price < stop_loss:
-                log(f"breached stop-loss and selling {ticker}...")
-                self.df.loc[df_idx, 'invested'] = 1
-                self.sell_stock(ticker, close_date)
-                continue
-
-            # Report a suspicious high change per stock/day. Threshold for now 
-            # set at 10%. Allows us to see what other stocks may have issues 
-            # than just SBT...
-            if abs(delta_amount / self.capital) > 0.1:
-                log('')
-                log('********************')
-                log(f'*** WARNING      *** capital changed by more than 10%'
-                    f' for {ticker} on {close_date}!')
-                log(f'***              *** no_shares={no_shares}'
-                    f' share_price={share_price} today_amount={today_amount}')
-                log(f'***              *** orig_amount={orig_amount} '
-                    f'close_amount={close_amount} delta_amount={delta_amount}')
-                log('********************')
-                log('')
-            
-            # Correct in_use and capital for delta_amount
-            self.capital  = self.capital + delta_amount
-            self.in_use   = self.in_use  + delta_amount
-            tol = abs(self.capital - self.in_use - self.free)
-            assert tol < TOLERANCE, "tol deviating too much!"
-
-            self.df.loc[df_idx, 'invested'] = 0
-
-            close_dict = {'date'        : [close_date],
-                         'ticker'       : [ticker],
-                         'action'       : ['CLOSE'],
-                         'orig_amount'  : [orig_amount],
-                         'close_amount' : [today_amount],
-                         'no_shares'    : [no_shares],
-                         'stop_loss'    : [stop_loss],
-                         'daily_gain'   : [delta_amount],
-                         'daily_pct'    : [delta_pct],
-                         'days_in_trade': [days_in_trade + 1],
-                         'invested'     : [ 1 ]
-                   }
-        
-            close_df = pd.DataFrame(close_dict)
-            self.df = pd.concat([self.df, close_df])
-            
-        # Store overall end day result in myCapital
-        self.myCapital.day_close(close_date, self.capital, self.in_use, 
+        self.rebalance_if_needed()
+        self.myCapital.day_close(self.close_date, self.capital, self.in_use, 
                                  self.free)
+        gc.collect()
