@@ -55,8 +55,8 @@ class Backtester(object):
 
         cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
                 'trading_days', 'daily_return', 'ticker']
-        br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col],axis=1)[cols]
-
+        #br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col],axis=1)[cols]
+        br_df = br_df[cols]
 
         log('')
         cols = ['buy_date', 'daily_return']
@@ -148,8 +148,8 @@ class Backtester(object):
         log('', True)
         log(f"Possible trades to simulate: {len(self.possible_trades)}", True)
         log(f"Trading days to simulate   : "
-            f"{len(self.backtest_trading_dates)}\n", True)
-        log(f'Pct_desired threshold      : {self.threshold}')
+            f"{len(self.backtest_trading_dates)}", True)
+        log(f'Pct_desired threshold      : {self.threshold}\n', True)
 
     def extract_dates_n_ticker(self):
         idx = self.i_possible_trades
@@ -282,6 +282,28 @@ class Backtester(object):
         log(f'day\t\tcapital\tfree\tin_use\t{h}\t{s}\t{b}')
         log(f'===\t\t=======\t====\t======\t{u}\t{u}\t{u}')
 
+
+    def update_stats_for_ticker(self, ticker_df):
+        ticker = ticker_df.ticker.unique()
+        assert len(ticker_df) == 1, "expected to be one row..."
+        tdf = ticker_df.copy()
+        tdf['gain'] = tdf.sell_close - tdf.buy_close
+        gain = tdf.gain.max()
+
+        # to be expanded ...
+
+    def update_ticker_stats(self):
+        idx = self.possible_trades.sell_date == self.trading_date
+        df = self.possible_trades.loc[idx].copy()
+        if len(df) == 0:
+            return
+
+        tickers_to_check = list(df.ticker.unique())
+        for t in tickers_to_check:
+            if t in self.tickers:
+                idx = df.ticker == t
+                self.update_stats_for_ticker(df.loc[idx])
+
     def main_back_test_loop(self):
 
         self.print_heading()
@@ -297,6 +319,7 @@ class Backtester(object):
             self.process_buy_opportunities()
             self.end_invested = self.myPnL.invested.copy()
             self.close_day()
+            self.update_ticker_stats()
 
     def run_back_test(self, capital, max_stocks):
         self.init_back_test_run(capital, max_stocks)
@@ -397,7 +420,7 @@ def backtest_main():
         bt.log_invested('invested in:')
         gains, losses = bt.print_backtest_stats()
 
-        # save key stats of runls 
+        # save key stats of run 
         capital_dict[th]      = bt.myPnL.capital
         invested_dict[th]     = bt.myPnL.invested.keys()
         len_tickers_dict[th]  = bt.len_tickers
@@ -411,18 +434,20 @@ def backtest_main():
 
     # Print summary...
     log('', True)
-    log('Threshold\tCapital\t\tGains\tLosses\tReturn\tLen\tInvested', True)
-    trading_days = 757
+    log('Threshold\tCapital\tGains\tLosses\tReturn\tLen\tInvested', True)
+    log('=========\t=======\t=====\t======\t======\t===\t========', True)
+    trading_days = len(bt.backtest_trading_dates)
+
     for th in thresholds:
         cap   = capital_dict[th]
         ret   = ( (cap/10000) ** (1/trading_days)) - 1
         ret   = round (ret * 100, 2)
-        inv   = list(invested_dict[th])
-        len   = len_tickers_dict[th]
+        inv   = set_to_string(list(invested_dict[th]), 30)
+        length   = len_tickers_dict[th]
         cap   = int(round(cap/1000,0))
         gains = int(round(gains_dict[th]/1000,0))
         losses = int(round(loss_dict[th]/1000,0))
-        log(f'{th}\t\t{cap}\t\t{gains}\t{losses}\t{ret}%\t{len}\t{inv}', True)
+        log(f'{th}\t\t{cap}\t{gains}\t{losses}\t{ret}%\t{length}\t{inv}', True)
 
     log('')
     log('Done.')
