@@ -23,7 +23,9 @@ from datetime                import datetime, timedelta
 
 from util                    import open_logfile, log, get_stock_period, \
                                     build_ticker_list, is_holiday, \
-                                    get_current_day_and_time, add_days_to_date
+                                    get_current_day_and_time, add_days_to_date, \
+                                    set_to_string, add_spaces
+
 from pnl                     import Capital, PnL
 from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
                                     STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
@@ -35,7 +37,9 @@ class Backtester(object):
 
     def augment_possible_trades_with_buy_opportunities(self):
         cols =[ 'ticker', 'pct_gain', 'day_gain', self.ret_col ]
-        br_df = pd.merge(self.buy_opportunities_df, 
+        idx = self.buy_opportunities_df.buy_date >= \
+              max(self.possible_trades_df.buy_date)
+        br_df = pd.merge(self.buy_opportunities_df[idx], 
                          self.ticker_stats_df[cols], how='inner')
 
         br_df['gain_pct']     = br_df.pct_gain.astype(float)
@@ -53,8 +57,7 @@ class Backtester(object):
                 'trading_days', 'daily_return', 'ticker']
         br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col],axis=1)[cols]
 
-        idx = br_df.buy_date >= max(self.possible_trades_df.buy_date)
-        br_df = br_df[idx]
+
         log('')
         cols = ['buy_date', 'daily_return']
         log('Adding following buy opportunities to possible trades:\n'
@@ -98,12 +101,13 @@ class Backtester(object):
     
     def pct_desired(self, threshold):
         # Read ticker statistics
+        self.threshold = threshold
         self.ticker_stats_df = pd.read_csv(STATS_FNM)
         idx = (self.ticker_stats_df.pct_desired >= threshold) \
             & (self.ticker_stats_df.daily_ret > 0)
         self.tickers = self.ticker_stats_df[idx].ticker.to_list()
         self.len_tickers = len(self.tickers)
-        log(f"tickers={self.tickers} len_tickers={self.len_tickers}\n\n")
+        log(f"pct_desired({threshold}):len_tickers={self.len_tickers}\n\n")
 
     def log_invested(self, message):
         log(message)
@@ -115,6 +119,7 @@ class Backtester(object):
         log(f"capital={self.myPnL.capital} in_use={self.myPnL.in_use}"
             f" free={self.myPnL.free}")
     
+    # TODO: rewrite when implementing dynamic ticker_stats_df updates
     def sort_possible_trades(self):
         self.possible_trades_df = pd.merge(self.possible_trades_df, 
             self.ticker_stats_df[['ticker', self.ret_col]], how='inner')
@@ -144,6 +149,7 @@ class Backtester(object):
         log(f"Possible trades to simulate: {len(self.possible_trades)}", True)
         log(f"Trading days to simulate   : "
             f"{len(self.backtest_trading_dates)}\n", True)
+        log(f'Pct_desired threshold      : {self.threshold}')
 
     def extract_dates_n_ticker(self):
         idx = self.i_possible_trades
@@ -160,62 +166,47 @@ class Backtester(object):
                 return True
         return False
 
-    def find_lowest_expected_gain(self):
-        lowest_expected_gain = None 
-        lowest_ticker        = None
-
-        for t in self.myPnL.invested.keys():
-            tidx = self.ticker_stats_df.ticker == t
-            t_total_days = float(self.ticker_stats_df.total_days.loc[tidx])
-            t_total_cnt  = float(self.ticker_stats_df.total_cnt.loc[tidx])
-            t_expected_days = t_total_days / t_total_cnt
-            t_daily_ret = float(self.ticker_stats_df[self.ret_col].loc[tidx])
-            t_expected_gain = (1 + (t_daily_ret/100)) ** t_expected_days - 1                       
-
-            if lowest_expected_gain is None or \
-               t_expected_gain < lowest_expected_gain:
-                lowest_expected_gain = t_expected_gain
-                lowest_ticker        = t
-
-        return lowest_ticker, lowest_expected_gain
-
-    def find_stock_to_replace(self):
+    def calc_expected_gain(self):
         idx = self.ticker_stats_df.ticker == self.ticker
         total_days = float(self.ticker_stats_df.total_days.loc[idx])
         total_cnt  = float(self.ticker_stats_df.total_cnt.loc[idx])
         expected_days = total_days / total_cnt
-        expected_gain = (1 + (self.daily_ret/100)) ** expected_days - 1
+        daily_ret = float(self.ticker_stats_df[self.ret_col].loc[idx])
+        expected_gain = (1 + (daily_ret/100)) ** expected_days - 1 
+        return expected_gain
 
+    def find_lowest_expected_gain(self):
+        lowest_expected_gain = None 
+        lowest_ticker        = None
+
+        save_ticker = self.ticker
+        for t in self.myPnL.invested.keys():
+            self.ticker = t
+            expected_gain = self.calc_expected_gain()
+
+            if lowest_expected_gain is None or \
+               expected_gain < lowest_expected_gain:
+                lowest_expected_gain = expected_gain
+                lowest_ticker        = t
+
+        self.ticker = save_ticker
+        return lowest_ticker, lowest_expected_gain
+
+    def find_stock_to_replace(self):
+        expected_gain = self.calc_expected_gain()
         lowest_ticker, lowest_expected_gain = self.find_lowest_expected_gain()
 
         if lowest_expected_gain is not None and \
            expected_gain > lowest_expected_gain:
-            log(f"*** selling {lowest_ticker} on {self.trading_date} to free "
-                f"up money for {self.ticker}")
             self.myPnL.sell_stock(lowest_ticker, self.trading_date)
-        else:
-            log(f"maxed out: {self.ticker} is not expected to perform better"
-                f" than stocks already invested in")
-            log(f"invested in: {list(self.myPnL.invested.keys())} "
-                f"({len(self.myPnL.invested)})")
-            log('') 
 
     def calc_amount(self):
         self.amount = self.myPnL.capital / self.max_stocks
-        log(f"*** buying {self.amount} in {self.ticker} "
-            f"on {self.buy_date} with target sell date of"
-            f" {self.sell_date}")
 
     def buy_stock(self):
-        log(f"enough money to buy {self.ticker}")
-        self.log_invested("invested in:")
-        self.log_PnL("before buy: myPnL=")
         self.myPnL.buy_stock(self.ticker, self.buy_date, 
                 self.sell_date, self.amount)
-        self.log_invested("after buy: invested in")
-        self.log_PnL("after buy: myPnL=")
 
-        # save the sell date for future processing
         if self.sell_date in self.sell_dates:
             self.sell_dates[self.sell_date].append(self.ticker)
         else:
@@ -232,19 +223,11 @@ class Backtester(object):
         if len(self.myPnL.invested) < self.max_stocks and \
             self.myPnL.free >= self.amount*0.25:
             self.buy_stock()
-        else:
-            log(f"not enough money to buy 25% of stock; not buying")
-            self.log_invested(f"invested in:")
-            self.log_PnL(f'myPnL=')
 
     def sell_stocks(self, to_sell):
         for ticker in to_sell:
             if ticker in self.myPnL.invested:
-                self.log_invested(f"before selling {ticker}")
-                self.log_PnL(f"before selling {ticker}")
                 self.myPnL.sell_stock(ticker, self.trading_date)
-                self.log_invested(f"after selling {ticker}")
-                self.log_PnL(f"after selling {ticker}")
 
     def process_sell_signals(self):
         if self.trading_date in self.sell_dates:
@@ -273,84 +256,52 @@ class Backtester(object):
             self.extract_dates_n_ticker()
 
     def close_day(self):
-        cap_before = self.myPnL.capital
-        log(f"before day_close {self.trading_date}:")
-        self.log_invested(f"before day close {self.trading_date}:")
-        self.log_PnL("before day close")
-        tol = self.myPnL.capital - self.myPnL.in_use - self.myPnL.free
-        tol = round(abs(tol), 6)
-        log(f'tol={tol} tolerance < TOLERANCE={tol < TOLERANCE}')
+        day = self.trading_date
+        self.myPnL.day_close(day)
 
-        self.myPnL.day_close(self.trading_date)
+        start_invested = set(self.start_invested.keys())
+        end_invested   = set(self.end_invested.keys())
 
-        log(f"after day_close {self.trading_date}:")
-        self.log_invested(f"after day close {self.trading_date}:")
-        self.log_PnL("after day close")
-        tol = self.myPnL.capital - self.myPnL.in_use - self.myPnL.free
-        tol = round(abs(tol), 6)
-        log(f'tol={tol} tolerance < TOLERANCE={tol < TOLERANCE}') 
+        hold = set_to_string(start_invested & end_invested, 30)
+        sell = set_to_string(start_invested - end_invested, 30)
+        buy  = set_to_string(end_invested - start_invested, 30)
+
+        cap  = int(round(self.myPnL.capital/1000, 0))
+        free = int(round(self.myPnL.free/1000, 0))
+        use  = int(round(self.myPnL.in_use/1000, 0))
+
+        log(f'{day}\t{cap}\t{free}\t{use}\t{hold}\t{sell}\t{buy}')
+
+    def print_heading(self):
+        width = 30
+        h = add_spaces("hold", width)
+        s = add_spaces("sell", width)
+        b = add_spaces("buy", width)
+        u = "=" * width
+
+        log(f'day\t\tcapital\tfree\tin_use\t{h}\t{s}\t{b}')
+        log(f'===\t\t=======\t====\t======\t{u}\t{u}\t{u}')
 
     def main_back_test_loop(self):
+
+        self.print_heading()
 
         for self.trading_day, self.trading_date in \
             enumerate(tqdm(self.backtest_trading_dates, 
                            desc="simulate trades: ")):
-
-            # if str(self.trading_date)[:10] == '2020-04-20':
-            #     log('')
-
+            
+            gc.collect()
             self.trading_date = str(self.trading_date)[:10]
+            self.start_invested = self.myPnL.invested.copy()
             self.process_sell_signals()
             self.process_buy_opportunities()
+            self.end_invested = self.myPnL.invested.copy()
             self.close_day()
-
-    # TODO: streamline and correct
-    def make_buy_recommendations(self):
-
-        cols = ['ticker', 'trading_days', 'gain_pct', 'daily_return']
-        mean_dict = self.possible_trades_df[cols].groupby('ticker')\
-            .agg(['mean']).to_dict()
-        mean_df = self.possible_trades_df[cols].groupby('ticker') \
-            .agg(['mean']).reset_index()
-        mean_df.columns=['ticker', 'trading_days', 'gain_pct', 'daily_return']
-        self.buy_opportunities_df = pd.merge(self.buy_opportunities_df, 
-                                             mean_df, how='inner')
-
-        # Get today's and yesterday's date
-        today = datetime.today()
-        yesterday = today - timedelta(1)
-        today     = today.strftime('%Y-%m-%d')
-        yesterday = yesterday.strftime('%Y-%m-%d')
-
-        buy_opportunities_df = pd.merge(buy_opportunities_df, ticker_stats_df, 
-                                        how='inner')
-
-        log('', True)
-        log("Today's buying recommendations:\n", True)
-        idx = (buy_opportunities_df.buy_date == today) 
-        #& (buy_opportunities_df.gain_pct > 0)
-        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, 
-             ascending=False)[0:self.max_stocks]
-        cols = ['ticker', 'buy_date', ret_col, 'gain_ratio', 
-                'e_gain_daily_ret', 'e_loss_daily_ret',
-                'day_gain', 'day_loss', 'day_zero']
-        log(df[cols], True)
-        log('', True)
-
-        log('', True)
-        log("Yesterday's buying recommendations:\n", True)
-        idx = (buy_opportunities_df.buy_date == yesterday) &\
-              (buy_opportunities_df.gain_pct > 0)
-        df = buy_opportunities_df.loc[idx].sort_values(by=ret_col, 
-             ascending=False)[0:self.max_stocks]
-        log(df[cols], True)
-        log('', True)
 
     def run_back_test(self, capital, max_stocks):
         self.init_back_test_run(capital, max_stocks)
         self.main_back_test_loop()
         self.myPnL.df.days_in_trade = self.myPnL.df.days_in_trade.astype(int)
-        #self.make_buy_recommendations()
 
     def create_sell_df(self):
         gc.collect()
@@ -384,15 +335,15 @@ class Backtester(object):
         else:
             log(f'Data frame is empty: unable to scatter plot!')
 
-    def sell_df_scatter_plot(self, threshold):
+    def sell_df_scatter_plot(self):
         log('')
-        fnm = f'{PICPATH}sell_df_scatter_{threshold}.png'
+        fnm = f'{PICPATH}sell_df_scatter_{self.threshold}.png'
         log(f'Saving scatter plot self.sell_df to {fnm}')
         self.scatter_plot(self.sell_df, 'days_in_trade', fnm)
 
-    def possible_trades_df_scatter_plot(self, threshold):
+    def possible_trades_df_scatter_plot(self):
         log('')
-        fnm = f'{PICPATH}pos_trades_df_scatter_{threshold}.png'
+        fnm = f'{PICPATH}pos_trades_df_scatter_{self.threshold}.png'
         log(f'Saving scatter plot self.possible_trades_df to {fnm}')
         self.scatter_plot(self.possible_trades_df, 'trading_days', fnm)
 
@@ -408,26 +359,25 @@ class Backtester(object):
 
         log('')
         log(f'gain_sum={gain_sum}\t\tgain_cnt={gain_cnt}')
-        log(f'loss_sum={loss_sum}\tloss_cnt={loss_cnt}')
-        log(f'zero_sum={zero_sum}\t\tloss_cnt={zero_cnt}')
+        log(f'loss_sum={loss_sum}\t\tloss_cnt={loss_cnt}')
+        log(f'zero_sum={zero_sum}\t\tzero_cnt={zero_cnt}')
         log('')
+        log(f'Total # transactions : {gain_cnt+loss_cnt+zero_cnt}')
 
         return gain_sum, loss_sum
 
-    def print_backtest_stats(self, threshold):
+    def print_backtest_stats(self):
         self.create_sell_df()
         self.describe_sell_df()
         self.value_counts_sell_df()
-        self.sell_df_scatter_plot(threshold)
-        self.possible_trades_df_scatter_plot(threshold)
+        self.sell_df_scatter_plot()
+        self.possible_trades_df_scatter_plot()
         gains, losses = self.calc_actual_gains_losses_zeros()
 
-        fnm = f'{DATAPATH}actual_{threshold}.csv'
+        fnm = f'{DATAPATH}actual_{self.threshold}.csv'
         log(f'Saving sell_df to {fnm}')
         self.sell_df.to_csv(fnm, index=False)
         return gains, losses
-
-
 
 def backtest_main():
     bt = Backtester()
@@ -443,10 +393,9 @@ def backtest_main():
         bt.pct_desired(th)
         bt.run_back_test(10000, 5)
         log('', True)
-        log(f'threshold={th}')
         bt.log_PnL('myPnL=')
         bt.log_invested('invested in:')
-        gains, losses = bt.print_backtest_stats(th)
+        gains, losses = bt.print_backtest_stats()
 
         # save key stats of runls 
         capital_dict[th]      = bt.myPnL.capital
@@ -459,17 +408,9 @@ def backtest_main():
         to_plot_cols = ['capital', 'in_use']
         bt.myPnL.myCapital.df[to_plot_cols].plot(figsize=(18,10))
         plt.savefig(f'{PICPATH}trade_threshold_{th}.png')
-        #plt.show()
-
-    log('')
-    log(f'capital_dict={capital_dict}')
-    log('')
-    log(f'invested_dict={invested_dict}')
-    log('')
-    log(f'tickers_dict={len_tickers_dict}')
-    log('')
 
     # Print summary...
+    log('', True)
     log('Threshold\tCapital\t\tGains\tLosses\tReturn\tLen\tInvested', True)
     trading_days = 757
     for th in thresholds:

@@ -150,6 +150,29 @@ def build_ticker_list():
 
     return tickers
 
-
 def empty_dataframe(cols):
     return pd.DataFrame(columns=cols)
+
+def trim_tickers(str):
+    if len(str) == 0:
+        return ''
+    str = str.replace('[', '')
+    str = str.replace(']', '')
+    str = str.replace(' ', '')
+    str = str.replace('\'', '')
+    return str
+
+def add_spaces(s: str, width):
+    s_len = len(s)
+    spaces_to_add = width - s_len
+    if spaces_to_add <= 0:
+        return s
+    s = s + " " * spaces_to_add
+    return s
+
+def set_to_string(my_set, width):
+    my_set = sorted(my_set)
+    set_str = str(my_set)
+    set_str = trim_tickers(set_str)
+    set_str = add_spaces(set_str, width)
+    return str(set_str[:width])
