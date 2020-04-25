@@ -20,7 +20,7 @@ def qa_stocks():
 
     tickers = sorted(list(stocks.TICKER))
     for ticker in tqdm(tickers):
-        success, _, _ = ticker_trades(ticker, False)
+        success, _, _, _ = ticker_trades(ticker, False)
         gc.collect()
 
         if success == False:
@@ -88,6 +88,4 @@ if __name__ == "__main__":
         log('', True)
         log('Done', True)
     else:
-        main()
-
- 
+        qa_main()

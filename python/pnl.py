@@ -181,7 +181,79 @@ class PnL(object):
         self.calc_no_shares_to_buy()
         self.update_buy_amount()  
         self.save_buy()
-     
+    
+    def validate_sell(self):
+        assert self.capital >= 0, "capital needs to be zero or greater"
+        assert self.in_use  >= 0, "in_use needs to be zero or greater"
+        assert self.free    >= 0, "free needs to be zero or greater"
+        tol = abs(self.capital - self.in_use - self.free) 
+        assert tol < TOLERANCE, "tolerance {tol} deviating too much!"
+
+    def get_sell_index(self, ticker):
+        self.ticker = ticker
+        idx    = (self.df.ticker == self.ticker) & (self.df.invested==1)
+        len_idx = len(self.df[idx])
+        assert len_idx == 1, "Did not get latest record index"
+        self.idx = idx
+
+    def get_last_record(self, ticker):
+
+        self.get_sell_index(ticker)
+        self.no_shares     = float(self.df['no_shares'].loc[self.idx])
+        self.close_amount  = float(self.df['close_amount'].loc[self.idx])
+        self.orig_amount   = float(self.df['orig_amount'].loc[self.idx])
+        self.stop_loss     = float(self.df['stop_loss'].loc[self.idx])
+        self.days_in_trade = int(self.df['days_in_trade'].loc[self.idx])
+
+    def get_hist_sell_date(self, sell_date):
+        self.sell_date = sell_date
+        idx = self.invested[self.ticker].index == sell_date
+        len_idx = len(self.invested[self.ticker].Close.loc[idx])
+        assert len_idx == 1, "Did not get {sell_date} record index"
+        self.idx = idx
+
+    def calc_profit_from_sales(self):
+        self.share_price=float(self.invested[self.ticker].Close.loc[self.idx])
+        self.share_price   = max(self.stop_loss, self.share_price)
+        self.today_amount  = self.no_shares * self.share_price
+        self.delta_amount  = self.today_amount - self.close_amount
+        self.delta_pct     = (self.delta_amount / self.close_amount) * 100
+    
+    def get_sell_share_price(self, ticker, sell_date):
+        self.get_last_record(ticker)
+        self.get_hist_sell_date(sell_date)
+
+
+    def update_sell_delta_amount(self):
+        self.capital  = self.capital    + self.delta_amount
+        self.in_use   = self.in_use     + self.delta_amount
+        
+        self.in_use   = max(self.in_use - self.today_amount, 0.0)
+        self.free     = self.free       + self.today_amount
+
+        self.validate_sell()
+
+        
+    def save_sell(self):
+        idx = self.df.ticker == self.ticker
+        self.df.loc[idx, 'invested'] = 0
+
+        sell_dict = {'date'        : [self.sell_date],
+                    'ticker'       : [self.ticker],
+                    'action'       : ['SELL'],
+                    'orig_amount'  : [self.orig_amount],
+                    'close_amount' : [self.today_amount],
+                    'no_shares'    : [self.no_shares],
+                    'stop_loss'    : [self.stop_loss],
+                    'daily_gain'   : [self.delta_amount],
+                    'daily_pct'    : [self.delta_pct],
+                    'days_in_trade': [self.days_in_trade + 1],
+                    'invested'     : [ 0 ]
+                   }
+        
+        sell_df = pd.DataFrame(sell_dict)
+        self.df = pd.concat([self.df, sell_df])
+
     def sell_stock (self, ticker, sell_date):
         """
         Sell stock on specified date. Also, remove the ticker from invested 
@@ -190,95 +262,15 @@ class PnL(object):
         Returns nothing.
         """
         
-        assert self.capital >= 0, "capital needs to be zero or greater"
-        assert self.in_use  >= 0, "in_use needs to be zero or greater"
-        assert self.free    >= 0, "free needs to be zero or greater"        
-        assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
-               "capital and in_use + free deviating too much!"
-
-        # Return if we do not own the stock (may be due to a forced 
-        # stop-loss sales)
+        self.validate_sell()
         if ticker not in self.invested:
             return 
         
-        # Get the latest close_amount for ticker and no_shares owned
-        tidx    = (self.df.ticker == ticker) & (self.df.invested==1)
-        len_tidx = len(self.df[tidx])
-        if len_tidx != 1:
-            log(f'pnl.sell_stock(): ticker={ticker}')
-            log(f'len_tidx={len_tidx}')
-            log(f'\n{self.df[tidx]}')
-            tidx =  (self.df.ticker == ticker)
-            log(f'All ticker = {ticker} related rows...')
-            log(f'\n{self.df[tidx]}')
-            return
+        self.get_sell_share_price(ticker, sell_date)
+        self.calc_profit_from_sales()    
+        self.update_sell_delta_amount()
+        self.save_sell()
 
-        no_shares     = float(self.df['no_shares'].loc[tidx])
-        close_amount  = float(self.df['close_amount'].loc[tidx])
-        orig_amount   = float(self.df['orig_amount'].loc[tidx])
-        stop_loss     = float(self.df['stop_loss'].loc[tidx])
-        days_in_trade = int(self.df['days_in_trade'].loc[tidx])
-        
-        # Calculate how much the sell will earn
-        sidx = self.invested[ticker].index == sell_date
-        len_sidx = len(self.invested[ticker].Close.loc[sidx])
-        if len_sidx != 1:
-            log(f'pnl.sell_stock(): ticker={ticker}')
-            log(f'len_sidx={len_sidx}')
-            log(f'\n{self.invested[ticker].loc[sidx]}')
-            return
-        
-        self.df.loc[tidx, 'invested'] = 0
-        share_price   = float(self.invested[ticker].Close.loc[sidx])
-        # Limit loss to stop_loss
-        share_price = max(stop_loss, share_price)
-        today_amount  = no_shares * share_price
-        delta_amount  = today_amount - close_amount
-        delta_pct     = (delta_amount / close_amount) * 100
-
-        # print the profit/loss of the trade
-        log(f"profit of selling {ticker} on {sell_date}: "
-              f"{today_amount - orig_amount}"
-              f"{round(((today_amount - orig_amount)/orig_amount)*100,2)}%")
-        
-        # Correct in_use and capital for delta_amount
-        self.capital  = self.capital + delta_amount
-        self.in_use   = self.in_use  + delta_amount
-        
-        # Shift today's amount (in_use -> free)
-        # We do not allow in_use to become negative, even if it is by
-        # a small amount...
-        self.in_use   = self.in_use - today_amount
-        if self.in_use < 0:
-            self.in_use = 0 
-        self.free     = self.free   + today_amount
-
-        if abs(self.capital - self.in_use - self.free) > TOLERANCE:
-            log("self.capital=", self.capital)
-            log("self.in_use=", self.in_use)
-            log("self.free=", self.free)
-            log("diff=", abs(self.capital - self.in_use - self.free))
-            assert abs(self.capital - self.in_use - self.free) < TOLERANCE, \
-                   "capital and in_use + free deviating too much!"
-        
-        # Save the stock sell
-        sell_dict = {'date'        : [sell_date],
-                    'ticker'       : [ticker],
-                    'action'       : ['SELL'],
-                    'orig_amount'  : [orig_amount],
-                    'close_amount' : [today_amount],
-                    'no_shares'    : [no_shares],
-                    'stop_loss'    : [stop_loss],
-                    'daily_gain'   : [delta_amount],
-                    'daily_pct'    : [delta_pct],
-                    'days_in_trade': [days_in_trade + 1],
-                    'invested'     : [ 0 ]
-                   }
-        
-        sell_df = pd.DataFrame(sell_dict)
-        self.df = pd.concat([self.df, sell_df])
-
-        # Remove stock from invested dictionary
         del self.invested[ticker]
     
     def get_latest_index(self, ticker):
