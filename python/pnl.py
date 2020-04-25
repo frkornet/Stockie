@@ -24,8 +24,8 @@ class Capital(object):
         assert in_use  >= 0, "in_use needs to be zero or greater"
         assert free    >= 0, "free needs to be zero or greater"
         
-        assert abs(capital - in_use - free) < TOLERANCE, \
-            "capital and in_use + free deviating too much!"
+        tol = abs(capital - in_use - free)
+        assert tol < TOLERANCE, f"tolerance {tol} deviating too much!"
         
         close_dict = { 'date'    : [close_date], 
                        'capital' : [capital],
@@ -65,7 +65,7 @@ class PnL(object):
     set at initialization. It also enforces, that capital = in_use + free. 
     Since these are floats, the code use the following trick to ensure they 
     are basically the same: abs(capital - in_use - free) < TOLERANCE where
-    TOLERANCE is 1E-6 (i.e. close to zero).
+    TOLERANCE is 1E-3 (i.e. close to zero).
 
     """
 
@@ -86,7 +86,11 @@ class PnL(object):
         self.free       = free
         self.max_stocks = max_stocks
     
-    def validate_buy(self):
+    ###################################
+    # Private methods for buy_stock() #
+    ###################################
+
+    def __validate_buy__(self):
         msg = f"amount ({self.amount}) needs to be greater than zero!"
         assert self.amount > 0, msg
         
@@ -99,7 +103,7 @@ class PnL(object):
         tol = abs(self.capital - self.in_use - self.free)
         assert tol < TOLERANCE, f"tolerance {tol} deviating too much!"
 
-    def check_sufficient_amount(self):
+    def __check_sufficient_amount__(self):
         if self.amount > self.free:
             if self.free > 0:
                 self.amount=self.free     # clipping amount
@@ -107,15 +111,15 @@ class PnL(object):
                 return False                   # not buying
         return True
 
-    def buy_stock_init(self, ticker, buy_date, sell_date, amount):
+    def __buy_stock_init__(self, ticker, buy_date, sell_date, amount):
         self.ticker = ticker
         self.buy_date = buy_date
         self.sell_date = sell_date
         self.amount = amount
-        self.validate_buy()
-        return self.check_sufficient_amount()
+        self.__validate_buy__()
+        return self.__check_sufficient_amount__()
 
-    def get_hist(self):
+    def __get_hist__(self):
         s, e = self.start, self.end_plus_1
         success, hist = get_stock_start(self.ticker, 2, s, e)
         if success == False:
@@ -130,20 +134,20 @@ class PnL(object):
         self.hist = hist
         return True
     
-    def calc_no_shares_to_buy(self):
+    def __calc_no_shares_to_buy__(self):
         self.invested[self.ticker] = self.hist.copy()
         idx = self.invested[self.ticker].index == self.buy_date
         self.share_price = float(self.invested[self.ticker].Close.loc[idx])
         self.no_shares = self.amount / self.share_price
         self.stop_loss = self.share_price * 0.9
 
-    def update_buy_amount(self):
+    def __update_buy_amount__(self):
         self.free   = self.free - self.amount
         self.in_use = self.in_use + self.amount
         tol = abs(self.capital - self.in_use - self.free)
         assert tol < TOLERANCE, f"tolerance ({tol}) deviating too much!"
 
-    def save_buy(self):
+    def __save_buy__(self):
         buy_dict = {'date'         : [self.buy_date],
                     'ticker'       : [self.ticker],
                     'action'       : ['BUY'],
@@ -172,69 +176,73 @@ class PnL(object):
         Returns nothing.
         """
 
-        if self.buy_stock_init(ticker, buy_date, sell_date, amount) == False:
+        if self.__buy_stock_init__(ticker, buy_date, sell_date, amount) == False:
             return
 
-        if self.get_hist() == False:
+        if self.__get_hist__() == False:
             return
 
-        self.calc_no_shares_to_buy()
-        self.update_buy_amount()  
-        self.save_buy()
+        self.__calc_no_shares_to_buy__()
+        self.__update_buy_amount__()  
+        self.__save_buy__()
     
-    def validate_sell(self):
+    ####################################
+    # Private methods for sell_stock() #
+    ####################################
+
+    def __validate_sell__(self):
         assert self.capital >= 0, "capital needs to be zero or greater"
         assert self.in_use  >= 0, "in_use needs to be zero or greater"
         assert self.free    >= 0, "free needs to be zero or greater"
         tol = abs(self.capital - self.in_use - self.free) 
         assert tol < TOLERANCE, "tolerance {tol} deviating too much!"
 
-    def get_sell_index(self, ticker):
+    def __get_sell_index__(self, ticker):
         self.ticker = ticker
         idx    = (self.df.ticker == self.ticker) & (self.df.invested==1)
         len_idx = len(self.df[idx])
         assert len_idx == 1, "Did not get latest record index"
         self.idx = idx
 
-    def get_last_record(self, ticker):
+    def __get_last_record__(self, ticker):
 
-        self.get_sell_index(ticker)
+        self.__get_sell_index__(ticker)
         self.no_shares     = float(self.df['no_shares'].loc[self.idx])
         self.close_amount  = float(self.df['close_amount'].loc[self.idx])
         self.orig_amount   = float(self.df['orig_amount'].loc[self.idx])
         self.stop_loss     = float(self.df['stop_loss'].loc[self.idx])
         self.days_in_trade = int(self.df['days_in_trade'].loc[self.idx])
 
-    def get_hist_sell_date(self, sell_date):
+    def __get_hist_sell_date__(self, sell_date):
         self.sell_date = sell_date
         idx = self.invested[self.ticker].index == sell_date
         len_idx = len(self.invested[self.ticker].Close.loc[idx])
         assert len_idx == 1, "Did not get {sell_date} record index"
         self.idx = idx
 
-    def calc_profit_from_sales(self):
+    def __calc_profit_from_sales__(self):
         self.share_price=float(self.invested[self.ticker].Close.loc[self.idx])
         self.share_price   = max(self.stop_loss, self.share_price)
         self.today_amount  = self.no_shares * self.share_price
         self.delta_amount  = self.today_amount - self.close_amount
         self.delta_pct     = (self.delta_amount / self.close_amount) * 100
     
-    def get_sell_share_price(self, ticker, sell_date):
-        self.get_last_record(ticker)
-        self.get_hist_sell_date(sell_date)
+    def __get_sell_share_price__(self, ticker, sell_date):
+        self.__get_last_record__(ticker)
+        self.__get_hist_sell_date__(sell_date)
 
 
-    def update_sell_delta_amount(self):
+    def __update_sell_delta_amount__(self):
         self.capital  = self.capital    + self.delta_amount
         self.in_use   = self.in_use     + self.delta_amount
         
         self.in_use   = max(self.in_use - self.today_amount, 0.0)
         self.free     = self.free       + self.today_amount
 
-        self.validate_sell()
+        self.__validate_sell__()
 
         
-    def save_sell(self):
+    def __save_sell__(self):
         idx = self.df.ticker == self.ticker
         self.df.loc[idx, 'invested'] = 0
 
@@ -262,25 +270,26 @@ class PnL(object):
         Returns nothing.
         """
         
-        self.validate_sell()
-        if ticker not in self.invested:
-            return 
-        
-        self.get_sell_share_price(ticker, sell_date)
-        self.calc_profit_from_sales()    
-        self.update_sell_delta_amount()
-        self.save_sell()
+        self.__validate_sell__()       
+        self.__get_sell_share_price__(ticker, sell_date)
+        self.__calc_profit_from_sales__()    
+        self.__update_sell_delta_amount__()
+        self.__save_sell__()
 
         del self.invested[ticker]
     
-    def get_latest_index(self, ticker):
+    ###################################
+    # Private methods for day_close() #
+    ###################################
+
+    def __get_latest_index__(self, ticker):
         idx  = (self.df.ticker == ticker) & (self.df.invested==1)
         len_idx = len(self.df.loc[idx])
         assert len_idx == 1, f"len_idx must be 1 (={len_idx}"
         self.idx = idx
 
-    def extract_latest_info(self, ticker):
-        self.get_latest_index(ticker)
+    def __extract_latest_info__(self, ticker):
+        self.__get_latest_index__(ticker)
         self.ticker        = ticker
         self.no_shares     = float(self.df['no_shares'].loc[self.idx])
         self.close_amount  = float(self.df['close_amount'].loc[self.idx])
@@ -288,8 +297,8 @@ class PnL(object):
         self.stop_loss     = float(self.df['stop_loss'].loc[self.idx])
         self.days_in_trade = int(self.df['days_in_trade'].loc[self.idx])
 
-    def get_shareprice(self, ticker):
-        self.extract_latest_info(ticker)
+    def __get_shareprice__(self, ticker):
+        self.__extract_latest_info__(ticker)
         hist_idx = self.invested[ticker].index == self.close_date
         hist_len = len(self.invested[ticker].Close.loc[hist_idx])
         if hist_len == 0:
@@ -306,7 +315,7 @@ class PnL(object):
 
         return True
 
-    def calc_delta_amount(self):
+    def __calc_delta_amount__(self):
         self.today_amount  = self.no_shares * self.share_price
         self.delta_amount  = self.today_amount - self.close_amount
         self.delta_pct     = (self.delta_amount / self.close_amount) * 100
@@ -314,9 +323,9 @@ class PnL(object):
                            / self.orig_amount) * 100
 
         if abs(self.delta_amount / self.capital) > 0.1:
-            self.print_warning()
+            self.__print_warning__()
 
-    def print_warning(self):
+    def __print_warning__(self):
         log('')
         log('********************')
         log(f'*** WARNING      *** capital changed by more than 10%'
@@ -328,13 +337,13 @@ class PnL(object):
         log('********************')
         log('')
 
-    def update_delta_amount(self):
+    def __update_delta_amount__(self):
         self.capital  = self.capital + self.delta_amount
         self.in_use   = self.in_use  + self.delta_amount
         tol = abs(self.capital - self.in_use - self.free)
         assert tol < TOLERANCE, "tol deviating too much!"
 
-    def add_close_record(self):
+    def __add_close_record__(self):
         idx = self.df.ticker == self.ticker
         self.df.loc[idx, 'invested'] = 0
 
@@ -354,7 +363,7 @@ class PnL(object):
         close_df = pd.DataFrame(close_dict)
         self.df = pd.concat([self.df, close_df])
 
-    def process_dividend(self):
+    def __process_dividend__(self):
         if self.dividend == 0:
             return
 
@@ -364,31 +373,31 @@ class PnL(object):
         tol = abs(self.capital - self.in_use - self.free)
         assert tol < TOLERANCE, "tol deviating too much!"
 
-    def update_dicts(self):
+    def __update_dicts__(self):
         self.no_shares_dict[self.ticker] = self.no_shares
         self.share_price_dict[self.ticker] = self.share_price
 
-    def day_close_ticker(self, ticker):
-        if self.get_shareprice(ticker) == False: 
+    def __day_close_ticker__(self, ticker):
+        if self.__get_shareprice__(ticker) == False: 
             return
 
         if self.share_price < self.stop_loss:
             self.sell_stock(ticker, self.close_date)
             return
 
-        self.calc_delta_amount()          
-        self.update_delta_amount()
-        self.process_dividend()
-        self.add_close_record()
-        self.update_dicts()
+        self.__calc_delta_amount__()          
+        self.__update_delta_amount__()
+        self.__process_dividend__()
+        self.__add_close_record__()
+        self.__update_dicts__()
 
-    def init_day_close(self, close_date):
+    def __init_day_close__(self, close_date):
         self.tickers = list(self.invested.keys())
         self.close_date = close_date
         self.no_shares_dict = {}
         self.share_price_dict = {}
 
-    def is_rebalance_needed(self):
+    def __is_rebalance_needed__(self):
         max_value = (self.capital / self.max_stocks) * 2
         tickers = list(self.invested.keys())
         for t in tickers:
@@ -397,10 +406,9 @@ class PnL(object):
                 return True
         return False
 
-    def rebalance_if_needed(self):
-        if self.is_rebalance_needed() == True:
+    def __rebalance_if_needed__(self):
+        if self.__is_rebalance_needed__() == True:
             log(f'*** rebalance needed at {self.close_date}')
-
 
     def day_close(self, close_date):
         """
@@ -408,11 +416,11 @@ class PnL(object):
         """
 
         gc.collect()
-        self.init_day_close(close_date)
+        self.__init_day_close__(close_date)
         for ticker in self.tickers:
-            self.day_close_ticker(ticker)
+            self.__day_close_ticker__(ticker)
 
-        self.rebalance_if_needed()
+        self.__rebalance_if_needed__()
         self.myCapital.day_close(self.close_date, self.capital, self.in_use, 
                                  self.free)
         gc.collect()
