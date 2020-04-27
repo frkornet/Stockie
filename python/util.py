@@ -150,8 +150,29 @@ def build_ticker_list():
 
     return tickers
 
-def empty_dataframe(cols):
-    return pd.DataFrame(columns=cols)
+def empty_dataframe(cols, data_types):
+    assert len(cols) == len(data_types), "len(cols) <> len(data_types)"
+
+    df = pd.DataFrame(columns=cols)
+    for i, c in enumerate(cols):
+        dt = data_types[i]
+        df[c] = df[c].astype(dt)
+
+    return df
+
+def dict_to_dataframe(df_dict, data_types):
+
+    df = pd.DataFrame(df_dict)
+    assert len(df.columns)==len(data_types), "len(df.cols) <> len(data_types)"
+
+    for i, c in enumerate(df.columns):
+        dt = data_types[i]
+        df[c] = df[c].astype(dt)
+
+    return df
+
+def save_dataframe_to_csv(df, fnm):
+    df.to_csv(fnm, index=False)
 
 def trim_tickers(str):
     if len(str) == 0:

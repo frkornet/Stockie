@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
-from symbols import TRAIN_TRADE_FNM, STATS_FNM, LOGPATH, PICPATH
-from util    import open_logfile, log, is_holiday, get_current_day_and_time
+from symbols import TRAIN_TRADE_FNM, TEST_TRADE_FNM, STATS_FNM, LOGPATH, \
+                    PICPATH, STAT_COLS,STAT_COL_TYPES, TRADE_COLS, \
+                    TRADE_COL_TYPES
+from util    import open_logfile, log, is_holiday, get_current_day_and_time, \
+                    empty_dataframe, dict_to_dataframe, save_dataframe_to_csv
 from tqdm    import tqdm
 
 import matplotlib.pyplot as plt
@@ -9,294 +12,327 @@ import matplotlib.pyplot as plt
 import gc; gc.enable()
 import warnings; warnings.filterwarnings("ignore")
 
-def read_possible_trades():
-    possible_trades_df = pd.read_csv(TRAIN_TRADE_FNM)
-    return possible_trades_df
+class Stats(object):
 
-def print_possible_trades_stats(trades_df):
-    trading_days = trades_df['trading_days']
-    gain_pct_df = trades_df['gain_pct']
+    def __init__(self, train_fnm, test_fnm):
+        self.train_fnm = train_fnm
+        self.train_df = self.__read_trades__(train_fnm)
+        assert len(self.train_df) > 0, "training data set cannot be empty"
 
-    starting_at = int(len(trades_df)*0.7)
-    train_trades_df = trades_df[:starting_at]
-    test_trades_df = trades_df[:starting_at]
+        self.test_fnm  = test_fnm
+        self.test_df = self.__read_trades__(test_fnm)
 
-    fig, axs = plt.subplots(3)
+        self.ticker = ''
 
-    trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], \
-                           figsize=(18,12))
-    axs[0].set_title('Possible trades: trading days vs percentage'
-                     ' gain (full set)')
+    def __read_trades__(self, fnm):
+        possible_trades_df = pd.read_csv(fnm)
+        return possible_trades_df
 
-    train_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[1], \
-                                 figsize=(18,12))
-    axs[1].set_title('Possible trades: trading days vs percentage'
-                     ' gain (training set)')
+    def __daily_return__(self, pct_gain, days):
+        daily_return = (1+pct_gain/100) ** (1/(days)) - 1
+        daily_return = round(daily_return * 100.0, 2)
+        return daily_return
+
+    def __daily_return_from_df__(self, ticker_df, pct_col):
+        ticker_df['ret'] = 1 + ticker_df[pct_col]/100
+        net_gain         = ticker_df.ret.product() - 1
+        net_gain         = net_gain * 100
+
+        if net_gain <= -100:
+            return -np.Inf
+
+        days = int(ticker_df.trading_days.sum())
+        return self.__daily_return__(net_gain, days)
+
+    def __init_gain_ticker_stats__(self):
+        self.cnt_gain      = 0
+        self.min_pct_gain  = 0
+        self.max_pct_gain  = 0
+        self.std_pct_gain  = 0
+        self.mean_pct_gain = 0
+        self.day_gain      = 0
+        self.gain_daily_return = 0
+
+    def __init_loss_ticker_stats__(self):
+        self.cnt_loss      = 0
+        self.min_pct_loss  = 0
+        self.max_pct_loss  = 0
+        self.std_pct_loss  = 0
+        self.mean_pct_loss = 0
+        self.day_loss      = 0
+        self.loss_daily_return = 0
+
+    def __init_zero_ticker_stats__(self):
+        self.cnt_zero      = 0
+        self.mean_day_zero = 0
+
+    def __init_tot_ticker_stats__(self):
+        self.total_days = 0
+        self.total_cnt  = 0
+        self.daily_ret  = -np.Inf
+
+    def __init_ticker_stats__(self):
+        self.__init_gain_ticker_stats__()
+        self.__init_loss_ticker_stats__()
+        self.__init_zero_ticker_stats__()
+        self.__init_tot_ticker_stats__()
+
+    def __calc_gain_ticker_stats__(self):
+        idx = (self.train_df.ticker == self.ticker) \
+            & (self.train_df.gain > 0)
+        ticker_df = self.train_df.loc[idx]
+        if len(ticker_df) == 0:  
+            return
+
+        pct_col = 'pct_gain'
+        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
+
+        self.cnt_gain       = len(ticker_df)
+        self.min_pct_gain   = ticker_df.pct_gain.min()
+        self.max_pct_gain   = ticker_df.pct_gain.max()
+        self.std_pct_gain   = ticker_df.pct_gain.std()
+        self.mean_pct_gain  = ticker_df.pct_gain.mean()
+        self.mean_day_gain  = float(ticker_df.trading_days.mean())
+        self.gain_daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
+
+    def __calc_loss_ticker_stats__(self):
+        idx = (self.train_df.ticker == self.ticker) \
+            & (self.train_df.gain < 0)
+        ticker_df = self.train_df.loc[idx]
+        if len(ticker_df) == 0:  
+            return
+
+        pct_col = 'pct_loss'
+        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
+
+        self.cnt_loss       = len(ticker_df)
+        self.min_pct_loss   = ticker_df.pct_loss.min()
+        self.max_pct_loss   = ticker_df.pct_loss.max()
+        self.std_pct_loss   = ticker_df.pct_loss.std()
+        self.mean_pct_loss  = ticker_df.pct_loss.mean()
+        self.mean_day_loss  = float(ticker_df.trading_days.mean())
+        self.loss_daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
+
+    def __calc_zero_ticker_stats__(self):
+        idx = (self.train_df.ticker == self.ticker) \
+            & (self.train_df.gain == 0)
+        ticker_df = self.train_df.loc[idx]
+
+        self.cnt_zero = len(ticker_df)
+        if self.cnt_zero > 0:
+            self.mean_day_zero = float(ticker_df.trading_days.mean())
+
+    def __calc_tot_ticker_stats__(self): 
+        idx = (self.train_df.ticker == self.ticker)
+        ticker_df = self.train_df.loc[idx]
+        if len(ticker_df) == 0:
+            return
+
+        pct_col = 'pct_gain'
+        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
+
+        self.total_cnt  = self.cnt_gain + self.cnt_loss + self.cnt_zero
+        self.total_days = int(ticker_df.trading_days.sum())
+        self.daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
+
+        desired_cnt   = len(ticker_df[ticker_df.daily_return > 0.5])
+        len_ticker_df = len(ticker_df)
+        pct_desired   = (desired_cnt / len_ticker_df) * 100
+        self.pct_desired   = round(pct_desired, 2)
+
+        self.gain_ratio = self.cnt_gain / self.total_cnt       
+
+    def __ticker_stats_to_df__(self):
+        t_dict = {
+            'ticker'        : [self.ticker], 
+
+            'cnt_gain'      : [self.cnt_gain],
+            'min_pct_gain'  : [self.min_pct_gain],
+            'max_pct_gain'  : [self.max_pct_gain],
+            'std_pct_gain'  : [self.std_pct_gain], 
+            'mean_pct_gain' : [self.mean_pct_gain],
+            'mean_day_gain' : [self.mean_day_gain],   
+            'gain_daily_ret': [self.gain_daily_ret],
+
+            'cnt_loss'      : [self.cnt_loss],
+            'min_pct_loss'  : [self.min_pct_loss],
+            'max_pct_loss'  : [self.max_pct_loss],
+            'std_pct_loss'  : [self.std_pct_loss], 
+            'mean_pct_loss' : [self.mean_pct_loss],
+            'mean_day_loss' : [self.mean_day_loss],   
+            'loss_daily_ret': [self.loss_daily_ret],
+            
+            'cnt_zero'      : [self.cnt_zero],
+            'mean_day_zero' : [self.mean_day_zero],   
+ 
+            'total_cnt'     : [self.cnt_gain + self.cnt_loss + self.cnt_zero],
+            'total_days'    : [self.total_days],
+            'mean_day'      : [self.total_days / self.total_cnt],
+            'daily_ret'     : [self.daily_ret],
+
+            'pct_desired'   : [self.pct_desired],
+            'gain_ratio'    : [self.gain_ratio],
+            'good'          : [ 0 ]
+            }
+
+        return dict_to_dataframe(t_dict, STAT_COL_TYPES)
+
+    def __calc_ticker_stats__(self):
+        self.__init_ticker_stats__()
+
+        self.__calc_gain_ticker_stats__()
+        self.__calc_loss_ticker_stats__()
+        self.__calc_zero_ticker_stats__()
+        self.__calc_tot_ticker_stats__()
+        gc.collect()
         
-    test_trades_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[2], \
-                                figsize=(18,12))
-    axs[2].set_title('Possible trades: trading days vs percentage'
-                     ' gain (test set)')
-
-    plt.savefig(f'{PICPATH}stats_scatter.png')
-
-
-def calc_ticker_stats(ticker_df):
-    cnt_gain  = len(ticker_df)
-    if cnt_gain > 0:
-        min_gain  = float(ticker_df.gain.min())
-        idx = ticker_df.gain == min_gain
-        assert len(ticker_df.loc[idx]) > 0, "Unable to find minimum gains!"
-        mean_buy_close = ticker_df[idx].buy_close.mean()
-        min_pct = float(min_gain  / mean_buy_close) * 100
-
-        max_gain  = float(ticker_df.gain.max())
-        idx = ticker_df.gain == max_gain
-        assert len(ticker_df.loc[idx]) > 0, "Unable to find maximum gains!"
-        mean_buy_close = ticker_df[idx].buy_close.mean()
-        max_pct = float(max_gain  / mean_buy_close) * 100
-
-        mean_gain = float(ticker_df.gain.mean())
-        std_gain  = float(ticker_df.gain.std())
-        day_gain  = float(ticker_df.trading_days.mean())
-        gain_sum  = float(ticker_df.buy_close.sum()) 
-        pct_gain  = ( (mean_gain * cnt_gain) / gain_sum ) * 100
-        gain_daily_return = (1+pct_gain/100) ** (1/(day_gain * cnt_gain)) - 1
-        gain_daily_return = gain_daily_return * 100.0
-    else:
-        min_gain  = 0.0
-        min_pct   = 0.0
-        max_gain  = 0.0
-        max_pct   = 0.0
-        mean_gain = 0.0
-        std_gain  = 0.0
-        day_gain  = 0.0
-        gain_sum  = 0.0
-        pct_gain  = 0.0
-        gain_daily_return = 0.0
-
-    tuple = (cnt_gain, min_gain, min_pct, max_gain, max_pct,
-             mean_gain, std_gain, day_gain, gain_sum, 
-             pct_gain, gain_daily_return)
-    return tuple
-
-def calc_zero_stats(ticker_df):
-    zero_cnt   = len(ticker_df)
-    if zero_cnt > 0:
-        day_zero = float(ticker_df.trading_days.mean())
-    else:
-        day_zero = 0.0
-    return zero_cnt, day_zero
-
-def calc_total_stats(ticker_df):
-    # Stop-loss kicks in at -10% => cap losses at 15% of buy_close
-    # This is a hack that is skewing the statistics. Needs rework...
-    # ticker_df.gain.loc[ticker_df.gain/ticker_df.buy_close < -0.1] = \
-    #    ticker_df.buy_close * (-0.15)
+        return self.__ticker_stats_to_df__()
     
-    total_buy  = float(ticker_df.buy_close.sum())
-    total_sell = float(ticker_df.sell_close.sum())
-    total_days = int(ticker_df.trading_days.sum())
-    total_cnt  = int(ticker_df.trading_days.count())
-    total_pct  = float(( (total_sell - total_buy) / total_buy ) * 100)
-       
-    expected_ret = 1 + total_pct/100
-    if expected_ret > 0:
-        daily_ret  = (1 + total_pct/100) ** (1/(total_days)) - 1
-        daily_ret  = daily_ret * 100.0
-    else:
-        daily_ret = -np.Inf #  0.0
+    def calc_stats(self):
+        self.train_df['gain'] = self.train_df.sell_close - self.train_df.buy_close
+        tickers = list(self.train_df.ticker.unique())
 
-    tuple = (total_buy, total_sell, total_days, total_cnt, total_pct, 
-             expected_ret, daily_ret)
-    return tuple
+        self.df = empty_dataframe(STAT_COLS, STAT_COL_TYPES)
+        save_ticker = self.ticker
+        for t in tqdm(tickers):
+            gc.collect()
+            self.ticker = t
+            self.df = pd.concat( [self.df, self.__calc_ticker_stats__()], 
+                                sort=False )
 
-def calc_stats_ticker(trades_df, ticker):
-    ticker_df = trades_df.loc[trades_df.ticker == ticker]
-    gain_df = ticker_df.loc[ticker_df.gain > 0]
-    loss_df = ticker_df.loc[ticker_df.gain < 0]
-    zero_df = ticker_df.loc[ticker_df.gain == 0]
+        self.ticker = save_ticker
+        log('')
+        log(f'\n{self.df.describe()}')
 
-    cnt_gain, min_gain, min_pct_gain, max_gain, max_pct_gain, mean_gain,\
-         std_gain, day_gain, gain_sum, pct_gain, gain_daily_return \
-        = calc_ticker_stats(gain_df)
-    cnt_loss, min_loss, min_pct_loss, max_loss, max_pct_loss, mean_loss, \
-        std_loss, day_loss, loss_sum, pct_loss, loss_daily_return \
-        = calc_ticker_stats(loss_df)
+    def plot_trades(self):
+        fig, axs = plt.subplots(2)
 
-    zero_cnt, day_zero = calc_zero_stats(zero_df)
-    total_buy, total_sell, total_days, total_cnt, total_pct, expected_ret, \
-        daily_ret = calc_total_stats(ticker_df)
+        self.train_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], 
+                                   figsize=(18,12))
 
-    # % of trades over 0.5 % per day compounded
-    desired_cnt   = len(ticker_df[ticker_df.daily_return > 0.5])
-    len_ticker_df = len(ticker_df)
-    pct_desired   = (desired_cnt / len_ticker_df) * 100
-    pct_desired   = round(pct_desired, 2)
+        self.test_df.plot.scatter(x='trading_days',  y='gain_pct', ax=axs[1], 
+                                  figsize=(18,12))
 
-    t_dict = {'ticker'     : [ticker], 
-              'min_gain'   : [min_gain],   'min_pct_gain':  [min_pct_gain],
-              'max_gain'   : [max_gain],   'max_pct_gain':  [max_pct_gain],
-              'mean_gain'  : [mean_gain],  'std_gain': [std_gain], 
-              'cnt_gain'   : [cnt_gain],   'pct_gain': [pct_gain],
-              'day_gain'   : [day_gain],   
-              'gain_daily_ret': [gain_daily_return],
-              'min_loss'   : [min_loss],   'min_pct_loss': [min_pct_loss],
-              'max_loss'   : [max_loss],   'max_pct_gain':  [max_pct_loss],
-              'mean_loss'  : [mean_loss],  'std_loss': [std_loss], 
-              'cnt_loss'   : [cnt_loss],   'pct_loss': [pct_loss],
-              'day_loss'   : [day_loss],   
-              'loss_daily_ret': [loss_daily_return],
-              'day_zero'   : [day_zero],   'zero_cnt'  : [zero_cnt],
-              'total_buy'  : [total_buy],  'total_sell': [total_sell], 
-              'total_days' : [total_days], 'total_cnt' : [total_cnt],
-              'total_pct'  : [total_pct],  'daily_ret' : [daily_ret],
-              'pct_desired': [pct_desired]
-             }
-    #log(f't_dict={t_dict}')
+        title_str = 'Possible trades: trading days vs percentage gain'
+        axs[0].set_title(title_str + '(training set)')
+        axs[1].set_title(title_str + '(test set)')
 
-    return pd.DataFrame(t_dict)
+        plt.savefig(f'{PICPATH}stats_scatter.png')
 
-def calc_stats(trades_df):
-    trades_df['gain'] = trades_df.sell_close - trades_df.buy_close
-    tickers = list(trades_df.ticker.unique())
+    def __sum_n_count__(self, df):
+        if len(df) == 0:
+            return 0, 0
 
-    cols = ['ticker', 
-            'min_gain',  'min_pct_gain',  'max_gain',  'max_pct_gain',
-            'mean_gain', 'std_gain', 'cnt_gain',  'pct_gain', 'day_gain', 
-            'gain_daily_ret',
-            'min_loss',  'min_pct_loss', 'max_loss', 'max_pct_loss',
-            'mean_loss', 'std_loss', 'cnt_loss',  'pct_loss', 'day_loss', 
-            'loss_daily_ret',
-            'day_zero',  'zero_cnt',  
-            'total_buy', 'total_sell', 'total_days', 'total_cnt', 'total_pct', 
-            'daily_ret', 'pct_desired'
-        ]
-    ticker_stats_df = pd.DataFrame(columns=cols)
+        aggs = ['sum', 'count']
+        s, c = df['gain'].agg(aggs)
+        return s, c
 
-    for t in tqdm(tickers):
-        gc.collect()
-        ticker_stats_df = pd.concat( [ticker_stats_df, 
-                                      calc_stats_ticker(trades_df, t)], 
-                                      sort=False )
-        #log('')
-        #log(f"ticker_stats_df after adding {t}")
-        #log(f'\n{ticker_stats_df}')
+    def __calc_n_print_ratios__(self, df):
+        gain_s, gain_c = self.__sum_n_count__(df.loc[df.gain > 0])
+        loss_s, loss_c = self.__sum_n_count__(df.loc[df.gain < 0])
+        zero_s, zero_c = self.__sum_n_count__(df.loc[df.gain == 0])
 
-    ticker_stats_df.cnt_gain   = ticker_stats_df.cnt_gain.astype(int)
-    ticker_stats_df.cnt_loss   = ticker_stats_df.cnt_loss.astype(int)
-    ticker_stats_df.zero_cnt   = ticker_stats_df.zero_cnt.astype(int)
-    ticker_stats_df.total_days = ticker_stats_df.total_days.astype(int)
-    ticker_stats_df.total_cnt  = ticker_stats_df.total_cnt.astype(int)
+        gain_s = round(gain_s, 2)
+        loss_s = round(loss_s, 2)
 
-    return ticker_stats_df
+        log('')
+        log(f'gain_sum={gain_s} gain_cnt={gain_c}')
+        log(f'loss_sum={loss_s} loss_cnt={loss_c}')
+        log(f'zero_sum={zero_s} zero_cnt={zero_c}')
+        log('')
+        gain_share = (gain_c / (gain_c + loss_c + zero_c)) * 100
+        gain_share = round(gain_share,2)
+        log(f'gain_share={gain_share} %')
+        log('')
 
-def post_processing(ticker_stats_df):
-    # Make sure that column of type integer
-    ticker_stats_df.cnt_gain   = ticker_stats_df.cnt_gain.astype(int)
-    ticker_stats_df.cnt_loss   = ticker_stats_df.cnt_loss.astype(int)
-    ticker_stats_df.zero_cnt   = ticker_stats_df.zero_cnt.astype(int)
-    ticker_stats_df.total_days = ticker_stats_df.total_days.astype(int)
-    ticker_stats_df.total_cnt  = ticker_stats_df.total_cnt.astype(int)
+    def train_df_ratios(self):
+        log('ratios for all tickers self.train_df:')
+        self.__calc_n_print_ratios__(self.train_df)
 
-    # Calculate gain ratio
-    ticker_stats_df['gain_ratio'] = ticker_stats_df.cnt_gain \
-                                  / (ticker_stats_df.total_cnt)
+    def __good_tickers_to_index__(self):
+        self.idx = self.df.ticker == ''
+        for t in self.good_tickers:
+            self.idx |= self.df.ticker == t
 
-    # Calculate expected daily returns for gains and losses
-    ticker_stats_df['e_gain_daily_ret'] = ticker_stats_df.gain_daily_ret \
-                                        * ticker_stats_df.gain_ratio
-    ticker_stats_df['e_loss_daily_ret'] = ticker_stats_df.gain_daily_ret \
-                                        * (1-ticker_stats_df.gain_ratio)
+    def __log_heuristics_stats__(self):
+        log(f'len(self.df)={len(self.df)}')
+        log(f'len(self.df[idx])={len(self.df[self.idx])}')
+        ratio = round(len(self.df[self.idx])/len(self.df), 2)
+        log(f'ratio={ratio}')
 
-    log("ticker_stats_df.describe=")
-    log(f'\n{ticker_stats_df.describe()}')
+    def heuristic(self, threshold):
+        idx = (self.df.daily_ret  > 0.0) \
+            & (self.df.pct_desired > threshold)
+        self.good_tickers = list(self.df.ticker.loc[idx].unique())
+        log(f'len(self.good_tickers)={len(self.good_tickers)}')
 
-    return ticker_stats_df
+        self.__good_tickers_to_index__()
+        self.__log_heuristics_stats__()
 
-def heuristic(ticker_stats_df, trades_df):
-    idx = (ticker_stats_df.daily_ret >0) & (ticker_stats_df.gain_ratio > 0.7) \
-        & (ticker_stats_df.pct_gain > abs(ticker_stats_df.pct_loss))
-    good_tickers = list(set(ticker_stats_df.ticker.loc[idx].to_list()))
-    log(f'len(good_tickers)={len(good_tickers)}')
-    log(f'good_tickers={good_tickers}')
+    def __good_subset_posible_trades__(self):
+        cols = list(self.train_df.columns)
+        self.good_df = empty_dataframe(TRADE_COLS, TRADE_COL_TYPES)
+        for t in self.good_tickers:
+            gc.collect()
+            idx = self.train_df.ticker == t
+            df = self.train_df.loc[idx]
+            if len(df) > 0:
+                self.good_df = pd.concat([self.good_df, df])
 
-    # Build index that identifies the good tickers in trades_df
-    idx = trades_df.ticker == ''
-    for t in good_tickers:
-        idx |= trades_df.ticker == t
+    def good_ticker_ratios(self):
+        self.__good_subset_posible_trades__()
+        log('ratios for good tickers:')
+        self.__calc_n_print_ratios__(self.good_df)
 
-    log(f'len(trades_df)={len(trades_df)}')
-    log(f'len(trades_df[idx])={len(trades_df[idx])}')
-    ratio = round(len(trades_df[idx])/len(trades_df), 2)
-    log(f'ratio={ratio}')
+    def __log_save_stats__(self):
 
-    return good_tickers, idx
+        good_len = len(self.good_df)
+        train_df_len = len(self.train_df)
 
-    # # cap losses at -15% (stop-loss)
-    # temp_df.gain_pct.loc[temp_df.gain_pct < -15.0] = -15.0
-    # temp_df    
+        df_len = len(self.df)
+        df_good_sum = sum(self.df.good)
 
-def calc_n_print_ratios(trades_df):
-    aggs = ['sum', 'count']
-    gain_sum, gain_cnt = trades_df['gain'].loc[trades_df.gain > 0].agg(aggs)
-    loss_sum, loss_cnt = trades_df['gain'].loc[trades_df.gain < 0].agg(aggs)
+        share= round(good_len / train_df_len * 100, 0)
 
-    idx = trades_df.gain == 0
-    if len(trades_df.loc[idx]) > 0:
-       zero_sum, zero_cnt = trades_df['gain'].loc[trades_df.gain==0].agg(aggs)
-    else:
-       zero_sum = zero_cnt = 0
+        log('')
+        log(f'total ticker count={df_len}')
+        log(f'good tickers count={df_good_sum}')
+        log('')
+        log(f'all ticker trades ={train_df_len}')
+        log(f'good ticker trades={good_len}')
+        log(f'good ticker share ={share}%')
+        log('')
 
-    gain_sum = round(gain_sum, 2)
-    loss_sum = round(loss_sum, 2)
+    def save_good_tickers(self, fnm):
 
-    log('')
-    log(f'gain_sum={gain_sum} gain_cnt={gain_cnt}')
-    log(f'loss_sum={loss_sum} loss_cnt={loss_cnt}')
-    log(f'zero_sum={loss_sum} zero_cnt={loss_cnt}')
-    gain_share = (gain_cnt / (gain_cnt + loss_cnt + zero_cnt)) * 100
-    gain_share = round(gain_share,2)
-    log(f'gain_share={gain_share} %')
-    log('')
+        self.df['good'] = 0
+        for t in self.good_tickers:
+            self.df.good.loc[self.df.ticker == t] = 1
 
-def save_good_tickers(ticker_stats_df, good_tickers):
-    ticker_stats_df['good'] = 0
-    for t in good_tickers:
-        ticker_stats_df.good.loc[ticker_stats_df.ticker == t] = 1
-    
-    log('')
-    log(f'len(good_tickers)={len(good_tickers)}')
-    log(f'sum(ticker_stats_df.good)={sum(ticker_stats_df.good)}')
+        self.__log_save_stats__()
+        save_dataframe_to_csv(self.df, fnm)
 
-    ticker_stats_df.to_csv(STATS_FNM, index=False)    
-
-def good_subset_posible_trades(good_tickers, possible_trades_df):
-    good_df = pd.DataFrame(columns=possible_trades_df.columns)
-    for t in good_tickers:
-        gc.collect()
-        idx = possible_trades_df.ticker == t
-        df = possible_trades_df.loc[idx]
-        if len(df) > 0:
-            good_df = pd.concat([good_df, df])
-
-    return good_df
 
 def stats_main():
-    trades_df = read_possible_trades()
-    #print_possible_trades_stats(trades_df)
-    ticker_stats_df = calc_stats(trades_df)
-    ticker_stats_df = post_processing(ticker_stats_df)
-    good_tickers, idx = heuristic(ticker_stats_df, trades_df)
-    print_possible_trades_stats(trades_df[idx])
-    log('trades_df (all tickers):')
-    calc_n_print_ratios(trades_df)
-    log('trades_df.loc[idx] (good tickers):')
-    good_df = good_subset_posible_trades(good_tickers, trades_df)
-    calc_n_print_ratios(good_df)
-    share= round((len(good_df)/len(trades_df)) * 100, 0)
-    log(f'len(good_df)/len(trades_df)={share}%')
-    save_good_tickers(ticker_stats_df, good_tickers)
+    log("Starting stats.py")
+    log('')
+    stats = Stats(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
+
+    log('Calculating individual ticker stats...\n')
+    stats.calc_stats()
+
+    log('Plotting the self.train_df and self.test_df scatter plots...\n')
+    stats.plot_trades()
+
+    log('Printing the stats.df ratios...\n')
+    stats.train_df_ratios()
+
+    log('Determining the good tickers and printing the ratios...\n')
+    stats.heuristic(10)
+    stats.good_ticker_ratios()
+
+    log('Saving the ticker stats (including good)...')
+    stats.save_good_tickers(STATS_FNM)
 
 
 if __name__ == "__main__":

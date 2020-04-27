@@ -36,14 +36,14 @@ import warnings; warnings.filterwarnings("ignore")
 class Backtester(object):
 
     def augment_possible_trades_with_buy_opportunities(self):
-        cols =[ 'ticker', 'pct_gain', 'day_gain', self.ret_col ]
+        cols =[ 'ticker', 'mean_pct_gain', 'mean_day', self.ret_col ]
         idx = self.buy_opportunities_df.buy_date >= \
               max(self.possible_trades_df.buy_date)
         br_df = pd.merge(self.buy_opportunities_df[idx], 
                          self.ticker_stats_df[cols], how='inner')
 
-        br_df['gain_pct']     = br_df.pct_gain.astype(float)
-        br_df['trading_days'] = round(br_df.day_gain, 0).astype(int)
+        br_df['gain_pct']= br_df.mean_pct_gain.astype(float)
+        br_df['trading_days'] = round(br_df.mean_day, 0).astype(int)
         br_df['daily_return'] = br_df[self.ret_col].astype(float)
 
         br_df['sell_date'] = br_df[['buy_date', 'trading_days']].apply(
@@ -51,7 +51,8 @@ class Backtester(object):
              axis=1)
         br_df.sell_date = br_df.sell_date.astype(str)
 
-        br_df['sell_close'] = round(br_df.buy_close*(1+br_df.pct_gain/100),2)
+
+        br_df['sell_close'] = round(br_df.buy_close*(1+br_df.mean_pct_gain/100),2)
 
         cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
                 'trading_days', 'daily_return', 'ticker']
