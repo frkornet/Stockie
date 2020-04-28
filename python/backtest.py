@@ -29,7 +29,7 @@ from util                    import open_logfile, log, get_stock_period, \
 from pnl                     import Capital, PnL
 from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
                                     STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
-                                    BUY_FNM
+                                    BUY_FNM, TRADE_COLS
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -53,11 +53,7 @@ class Backtester(object):
 
 
         br_df['sell_close'] = round(br_df.buy_close*(1+br_df.mean_pct_gain/100),2)
-
-        cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
-                'trading_days', 'daily_return', 'ticker']
-        #br_df = br_df.drop(['pct_gain', 'day_gain', self.ret_col],axis=1)[cols]
-        br_df = br_df[cols]
+        br_df = br_df[TRADE_COLS]
 
         log('')
         cols = ['buy_date', 'daily_return']
@@ -412,7 +408,8 @@ def backtest_main():
     gains_dict = {}
     loss_dict = {}
 
-    thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    thresholds = [10, 20, 30]
     for th in thresholds:
         bt.pct_desired(th)
         bt.run_back_test(10000, 5)

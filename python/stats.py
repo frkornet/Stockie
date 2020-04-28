@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from symbols import TRAIN_TRADE_FNM, TEST_TRADE_FNM, STATS_FNM, LOGPATH, \
                     PICPATH, STAT_COLS,STAT_COL_TYPES, TRADE_COLS, \
-                    TRADE_COL_TYPES
+                    TRADE_COL_TYPES, STAT_BATCH_SIZE
 from util    import open_logfile, log, is_holiday, get_current_day_and_time, \
                     empty_dataframe, dict_to_dataframe, save_dataframe_to_csv
 from tqdm    import tqdm
@@ -14,15 +14,21 @@ import warnings; warnings.filterwarnings("ignore")
 
 class Stats(object):
 
-    def __init__(self, train_fnm, test_fnm):
+
+    def reset_trade_files(self, train_fnm, test_fnm):
         self.train_fnm = train_fnm
         self.train_df = self.__read_trades__(train_fnm)
         assert len(self.train_df) > 0, "training data set cannot be empty"
+        gc.collect()
 
         self.test_fnm  = test_fnm
         self.test_df = self.__read_trades__(test_fnm)
+        gc.collect()
 
+    def __init__(self, train_fnm, test_fnm):
+        self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
+        self.batched_days = []
 
     def __read_trades__(self, fnm):
         possible_trades_df = pd.read_csv(fnm)
@@ -194,7 +200,7 @@ class Stats(object):
 
         self.df = empty_dataframe(STAT_COLS, STAT_COL_TYPES)
         save_ticker = self.ticker
-        for t in tqdm(tickers):
+        for t in tqdm(tickers, "Stats:"):
             gc.collect()
             self.ticker = t
             self.df = pd.concat( [self.df, self.__calc_ticker_stats__()], 
@@ -260,14 +266,17 @@ class Stats(object):
         ratio = round(len(self.df[self.idx])/len(self.df), 2)
         log(f'ratio={ratio}')
 
-    def heuristic(self, threshold):
+    def heuristic(self, threshold, verbose=True):
+        self.threshold = threshold
         idx = (self.df.daily_ret  > 0.0) \
             & (self.df.pct_desired > threshold)
         self.good_tickers = list(self.df.ticker.loc[idx].unique())
         log(f'len(self.good_tickers)={len(self.good_tickers)}')
 
         self.__good_tickers_to_index__()
-        self.__log_heuristics_stats__()
+        if verbose == True:
+            self.__log_heuristics_stats__()
+
 
     def __good_subset_posible_trades__(self):
         cols = list(self.train_df.columns)
@@ -303,15 +312,59 @@ class Stats(object):
         log(f'good ticker share ={share}%')
         log('')
 
-    def save_good_tickers(self, fnm):
-
+    def __set_good_tickers__(self):
         self.df['good'] = 0
         for t in self.good_tickers:
             self.df.good.loc[self.df.ticker == t] = 1
 
+    def save_good_tickers(self, fnm):
+
+        self.__set_good_tickers__()
         self.__log_save_stats__()
         save_dataframe_to_csv(self.df, fnm)
 
+    def add_day(self, trading_date):
+
+        idx = self.test_df.sell_date == trading_date
+        test_len = len(self.test_df.loc[idx])
+        if test_len == 0:
+            return
+        
+        self.batched_days.append(trading_date)
+        if len(self.batched_days) < STAT_BATCH_SIZE:
+            return
+
+        idx = self.test_df.sell_date == ''
+        for d in self.batched_days:
+            idx |= self.test_df.sell_date == d
+
+        tickers_to_process = list(self.test_df.loc[idx].ticker.unique())
+        log(f'Processing {self.batched_days}')
+        log(f'Unique tickers={len(tickers_to_process)}')
+
+        self.train_df = pd.concat([self.train_df, self.test_df.loc[idx]])
+
+        save_ticker = self.ticker
+        for t in tickers_to_process:
+            self.ticker = t
+            idx = self.df.ticker == t
+            self.df = self.df[~idx]
+            ticker_df = self.__calc_ticker_stats__()
+            self.df = pd.concat([self.df, ticker_df])
+
+        self.ticker = save_ticker
+        self.heuristic(self.threshold)
+        self.__set_good_tickers__()
+        self.batched_days = []
+
+def test_add_day(stats):
+    log('Test add_day() functionality for non-existing trading date:')
+    stats.add_day('2100-04-28')
+
+    dates_to_process = sorted(list(stats.test_df.sell_date.unique()))
+
+    for d in tqdm(dates_to_process, "Dates:"):
+        stats.add_day(d)
 
 def stats_main():
     log("Starting stats.py")
@@ -334,6 +387,7 @@ def stats_main():
     log('Saving the ticker stats (including good)...')
     stats.save_good_tickers(STATS_FNM)
 
+    test_add_day(stats)
 
 if __name__ == "__main__":
 
