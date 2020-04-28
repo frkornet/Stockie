@@ -22,7 +22,8 @@ from symbols                 import BUY, SELL, STOCKS_FNM, EXCLUDE_FNM, \
                                     FULL_TRADE_FNM, TRAIN_TRADE_FNM, \
                                     TEST_TRADE_FNM, BUY_FNM, LOGPATH, \
                                     EXCLUDE_SET, TRADE_PERIOD, \
-                                    TRADE_THRESHOLD, TRADE_DAILY_RET
+                                    TRADE_THRESHOLD, TRADE_DAILY_RET, \
+                                    TRADE_COLS, TRADE_COL_TYPES
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -312,13 +313,13 @@ def get_possible_trades(tickers, threshold, period, verbose):
     # print("tickers=", tickers)
     target = 'target'
     
-    cols = ['buy_date', 'buy_close', 'sell_date', 'sell_close', 'gain_pct',
-            'trading_days', 'daily_return', 'ticker' ]
-    train_possible_trades_df = empty_dataframe(cols)
-    test_possible_trades_df = empty_dataframe(cols)
+    cols = TRADE_COLS
+    train_possible_trades_df = empty_dataframe(cols, TRADE_COL_TYPES)
+    test_possible_trades_df = empty_dataframe(cols, TRADE_COL_TYPES)
 
     cols=['ticker', 'buy_date', 'buy_close']
-    buy_opportunities_df = empty_dataframe(cols)
+    col_types = [str, str, float]
+    buy_opportunities_df = empty_dataframe(cols, col_types)
     
     #print('Determining possible trades...\n')
     for ticker in tqdm(tickers, desc="possible trades: "):

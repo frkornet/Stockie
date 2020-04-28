@@ -4,8 +4,10 @@ from stats      import stats_main
 from backtest   import backtest_main
 from util       import open_logfile, log, get_current_day_and_time, is_holiday
 from symbols    import LOGPATH
+from time       import time, sleep
 
 def job_main():
+    start_time = time()
     log('Starting main Stockie job.')
 
     log('Starting qa_main().')
@@ -26,6 +28,15 @@ def job_main():
 
     log('')
     log('Done.')
+
+    # needs to go into util.py as helper function
+    sleep(60)
+    seconds = int(time() - start_time)
+    minutes = int(seconds / 60)
+    seconds = seconds - minutes * 60
+    hours = int(minutes / 60)
+    minutes = minutes - hours * 60
+    log(f'Run time (hh:mm:ss) : {hours}:{minutes}:{seconds}')
 
 if __name__ == "__main__":
 
