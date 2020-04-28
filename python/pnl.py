@@ -121,14 +121,17 @@ class PnL(object):
 
     def __get_hist__(self):
         s, e = self.start, self.end_plus_1
-        success, hist = get_stock_start(self.ticker, 2, s, e)
+        success, hist = get_stock_start(self.ticker, 3, s, e)
         if success == False:
-            log(f'Failed to retrieve data from yf ({ticker}) to buy stock')
+            log(f'Failed to retrieve {self.ticker} data to buy stock')
             return False
 
         idx = hist.index == self.buy_date
-        if len(hist.Close.loc[idx]) != 1:
-            log(f"Unable to retrieve {buy_date} for {ticker}")
+        len_idx = len(hist.loc[idx])
+        if len_idx != 1:
+            msg = f"Unable to retrieve {self.buy_date} for {self.ticker}" \
+                + f" (len_idx={len_idx})"
+            log(msg)
             return False
         
         self.hist = hist
