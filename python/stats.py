@@ -14,11 +14,36 @@ import warnings; warnings.filterwarnings("ignore")
 
 class Stats(object):
 
+    def __read_trades__(self, fnm):
+        possible_trades_df = pd.read_csv(fnm)
+        return possible_trades_df
+
+    def augment_train_df(self):
+        self.train_df['gain'] = self.train_df.sell_close \
+                              - self.train_df.buy_close
+        self.train_df['pct_gain'] = (self.train_df.gain \
+                                  / self.train_df.buy_close) * 100
+        self.train_df['ret'] = 1 + self.train_df['pct_gain']/100
+        self.train_df['dret'] = round(self.train_df.ret \
+                             ** (1/self.train_df.trading_days) - 1, 4) \
+                              * 100
+
+        self.gain_df = self.train_df.loc[self.train_df.gain >  0]
+        self.desired_df = self.train_df.loc[self.train_df.dret >  0.5]
+        self.loss_df = self.train_df.loc[self.train_df.gain <  0]
+        self.zero_df = self.train_df.loc[self.train_df.gain == 0]
+
+        self.total_tickers = set(self.train_df.ticker.unique())
+        self.desired_tickers = set(self.desired_df.ticker.unique())
+        self.gain_tickers  = set(self.gain_df.ticker.unique())
+        self.loss_tickers  = set(self.loss_df.ticker.unique())
+        self.zero_tickers  = set(self.zero_df.ticker.unique())
 
     def reset_trade_files(self, train_fnm, test_fnm):
         self.train_fnm = train_fnm
         self.train_df = self.__read_trades__(train_fnm)
         assert len(self.train_df) > 0, "training data set cannot be empty"
+        #self.augment_train_df()
         gc.collect()
 
         self.test_fnm  = test_fnm
@@ -29,10 +54,7 @@ class Stats(object):
         self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
         self.batched_days = []
-
-    def __read_trades__(self, fnm):
-        possible_trades_df = pd.read_csv(fnm)
-        return possible_trades_df
+        self.total_tickers = set(self.train_df.ticker.unique())
 
     def __daily_return__(self, pct_gain, days):
         daily_return = (1+pct_gain/100) ** (1/(days)) - 1
@@ -194,21 +216,197 @@ class Stats(object):
         
         return self.__ticker_stats_to_df__()
     
+    def desired_stats(self):
+        idx = self.train_df.dret > 0.5
+        ddf = self.train_df.loc[idx].groupby(by='ticker')['dret'].count().reset_index()
+        ddf.columns = [ 'ticker', 'cnt_desired']
+        
+        # create zeros for missing tickers -> edf
+        tickers_to_add = list(self.total_tickers - self.desired_tickers)
+        tlen = len(tickers_to_add)
+        zero_list_int   = [int(0)] * tlen
+
+        t_dict = {'ticker'      : tickers_to_add, 
+                  'cnt_desired' : zero_list_int
+                 }
+        edf = pd.DataFrame(t_dict)
+
+        #concatenate gdf and edf -> gdf
+        self.ddf = pd.concat([ddf, edf])
+
+    def gain_stats(self):
+        # group by ticker and calculate stats -> tdf
+        aggs=['count', 'min', 'max', 'std', 'mean', 'sum']
+        tdf = self.gain_df.groupby(by='ticker').agg(aggs)[['gain_pct', 'trading_days']].reset_index()
+        tdf.columns=['ticker', 'cnt_gain', 'min_pct_gain', 'max_pct_gain', 'std_pct_gain', 
+                     'mean_pct_gain', 'sum_pct_gain',
+                     'cnt_trading_days', 'min_trading_days', 'max_trading_days', 'std_trading_days',
+                     'mean_day_gain', 'sum_day_gain']
+
+        # set null for std_pct_gain to zero in case there is only 1 row for ticker
+        idx = tdf.std_pct_gain.isna() == True
+        tdf.std_pct_gain.loc[idx] = 0
+
+        # calculate return per ticker -> rdf
+        rdf = self.gain_df.groupby(by='ticker')['ret'].prod().reset_index()
+        rdf.columns=['ticker', 'ret']
+
+        # inner join join gdf and rdf -> gdf
+        gdf = pd.merge(left=tdf, right=rdf, on='ticker', how='inner')
+        gdf['gain_daily_ret'] = round((gdf.ret ** (1/gdf.sum_day_gain) - 1) * 100, 2)
+
+        # only keep needed columns
+        cols_to_keep = ['ticker', 'cnt_gain', 'min_pct_gain', 'max_pct_gain', 'std_pct_gain', 'mean_pct_gain',
+                        'mean_day_gain', 'gain_daily_ret']
+        gdf = gdf[cols_to_keep]
+
+        # create zeros for missing tickers -> edf
+        tickers_to_add = list(self.total_tickers - self.gain_tickers)
+        tlen = len(tickers_to_add)
+        zero_list_float = [0.0] * tlen
+        zero_list_int   = [int(0)] * tlen
+
+        t_dict = {'ticker'         : tickers_to_add, 
+                  'cnt_gain'       : zero_list_int,
+                  'min_pct_gain'   : zero_list_float,
+                  'max_pct_gain'   : zero_list_float,
+                  'std_pct_gain'   : zero_list_float,
+                  'mean_pct_gain'  : zero_list_float,
+                  'mean_day_gain'  : zero_list_float,
+                  'gain_daily_ret' : zero_list_float
+                 }
+        edf = pd.DataFrame(t_dict)
+
+        #concatenate gdf and edf -> gdf
+        gdf = pd.concat([gdf, edf])
+        self.desired_stats()
+        self.gdf = pd.merge(left=gdf, right=self.ddf, on='ticker', how='inner')
+
+    def loss_stats(self):
+        # group by ticker and calculate stats -> tdf
+        aggs=['count', 'min', 'max', 'std', 'mean', 'sum']
+        tdf = self.loss_df.groupby(by='ticker').agg(aggs)[['gain_pct', 'trading_days']].reset_index()
+        tdf.columns=['ticker', 'cnt_loss', 'min_pct_loss', 'max_pct_loss', 'std_pct_loss', 'mean_pct_loss',
+                     'sum_pct_loss',
+                     'cnt_trading_days', 'min_trading_days', 'max_trading_days', 'std_trading_days',
+                     'mean_day_loss', 'sum_day_loss']
+
+        # set null for std_pct_gain to zero in case there is only 1 row for ticker
+        idx = tdf.std_pct_loss.isna() == True
+        tdf.std_pct_loss.loc[idx] = 0
+
+        # calculate return per ticker -> rdf
+        rdf = self.loss_df.groupby(by='ticker')['ret'].prod().reset_index()
+        rdf.columns=['ticker', 'ret']
+
+        # inner join join gdf and rdf -> gdf
+        ldf = pd.merge(left=tdf, right=rdf, on='ticker', how='inner')
+        ldf['loss_daily_ret'] = round((ldf.ret ** (1/ldf.sum_day_loss) - 1) * 100, 2)
+
+        # only keep needed columns
+        cols_to_keep = ['ticker', 'cnt_loss', 'min_pct_loss', 'max_pct_loss', 'std_pct_loss', 'mean_pct_loss',
+                        'mean_day_loss', 'loss_daily_ret']
+        ldf = ldf[cols_to_keep]
+
+        # create zeros for missing tickers -> edf
+        tickers_to_add = list(self.total_tickers - self.loss_tickers)
+        tlen = len(tickers_to_add)
+        zero_list_float = [0.0] * tlen
+        zero_list_int   = [int(0)] * tlen
+
+        t_dict = {'ticker'         : tickers_to_add, 
+                  'cnt_loss'       : zero_list_int,
+                  'min_pct_loss'   : zero_list_float,
+                  'max_pct_loss'   : zero_list_float,
+                  'std_pct_loss'   : zero_list_float,
+                  'mean_pct_loss'  : zero_list_float,
+                  'mean_day_loss'  : zero_list_float,
+                  'loss_daily_ret' : zero_list_float
+                 }
+        edf = pd.DataFrame(t_dict)
+
+        #concatenate gdf and edf -> gdf
+        self.ldf = pd.concat([ldf, edf], sort=False)
+
+    def zero_stats(self):
+        # group by ticker and calculate stats -> tdf
+        aggs=['count', 'mean']
+        tdf = self.zero_df.groupby(by='ticker').agg(aggs)[['trading_days']].reset_index()
+        tdf.columns=['ticker', 'cnt_zero', 'mean_day_zero']
+
+        # create zeros for missing tickers -> edf
+        tickers_to_add = list(self.total_tickers - self.zero_tickers)
+        tlen = len(tickers_to_add)
+        zero_list_float = [0.0] * tlen
+        zero_list_int   = [int(0)] * tlen
+
+        t_dict = {'ticker'         : tickers_to_add, 
+                  'cnt_zero'       : zero_list_int,
+                  'mean_day_zero'  : zero_list_float
+                 }
+        edf = pd.DataFrame(t_dict)
+
+        #concatenate gdf and edf -> gdf
+        self.zdf = pd.concat([tdf, edf], sort=False)
+
+    def total_stats(self):
+        # group by ticker and calculate stats -> tdf
+        aggs=['count', 'sum', 'mean']
+        tdf = self.train_df.groupby(by='ticker').agg(aggs)[['trading_days']].reset_index()
+        tdf.columns=['ticker', 'total_cnt', 'total_days', 'mean_day']
+
+        # calculate return per ticker -> rdf
+        rdf = self.train_df.groupby(by='ticker')['ret'].prod().reset_index()
+        rdf.columns=['ticker', 'ret']
+
+        # inner join join gdf and rdf -> gdf
+        tdf = pd.merge(left=tdf, right=rdf, on='ticker', how='inner')
+        tdf['daily_ret'] = round((tdf.ret ** (1/tdf.total_days) - 1) * 100, 2)
+
+        # only keep needed columns
+        cols_to_keep = ['ticker', 'total_cnt', 'total_days', 'mean_day', 'daily_ret']
+        self.tdf = tdf[cols_to_keep]
+        
+    def create_stats(self):
+        self.augment_train_df()
+
+        self.gain_stats()
+        log(f"ddf: {len(self.ddf)}")
+        log(f"gdf: {len(self.gdf)}")
+        self.loss_stats()
+        log(f"ldf: {len(self.ldf)}")
+        self.zero_stats()
+        log(f"zdf: {len(self.zdf)}")
+        self.total_stats()
+        log(f"tdf: {len(self.tdf)}")
+        
+        cdf = pd.merge(left=self.gdf, right=self.ldf, on='ticker', how='inner' )
+        cdf = pd.merge(left=cdf, right=self.zdf, on='ticker', how='inner' )
+        cdf = pd.merge(left=cdf, right=self.tdf, on='ticker', how='inner' )
+        cdf['pct_desired'] = round((cdf.cnt_desired / cdf.total_cnt) * 100, 2)
+        cdf['gain_ratio'] = round((cdf.cnt_gain / cdf.total_cnt) * 100, 2)
+        cdf['good'] = 0
+
+        self.df = cdf
+
+        gc.collect()
+ 
     def calc_stats(self):
-        self.train_df['gain'] = self.train_df.sell_close - self.train_df.buy_close
-        tickers = list(self.train_df.ticker.unique())
+        self.create_stats()
+        # self.train_df['gain'] = self.train_df.sell_close - self.train_df.buy_close
+        # tickers = list(self.train_df.ticker.unique())
 
-        self.df = empty_dataframe(STAT_COLS, STAT_COL_TYPES)
-        save_ticker = self.ticker
-        for t in tqdm(tickers, "Stats:"):
-            gc.collect()
-            self.ticker = t
-            self.df = pd.concat( [self.df, self.__calc_ticker_stats__()], 
-                                sort=False )
+        # self.df = empty_dataframe(STAT_COLS, STAT_COL_TYPES)
+        # save_ticker = self.ticker
+        # for t in tqdm(tickers, "Stats:"):
+        #     gc.collect()
+        #     self.ticker = t
+        #     self.df = pd.concat( [self.df, self.__calc_ticker_stats__()], 
+        #                         sort=False )
 
-        self.ticker = save_ticker
-        log('')
-        log(f'\n{self.df.describe()}')
+        # self.ticker = save_ticker
+        # log('')
+        # log(f'\n{self.df.describe()}')
 
     def plot_trades(self):
         fig, axs = plt.subplots(2)
@@ -343,16 +541,18 @@ class Stats(object):
         log(f'Unique tickers={len(tickers_to_process)}')
 
         self.train_df = pd.concat([self.train_df, self.test_df.loc[idx]])
+        self.calc_stats()
 
-        save_ticker = self.ticker
-        for t in tickers_to_process:
-            self.ticker = t
-            idx = self.df.ticker == t
-            self.df = self.df[~idx]
-            ticker_df = self.__calc_ticker_stats__()
-            self.df = pd.concat([self.df, ticker_df])
+        # save_ticker = self.ticker
+        # for t in tickers_to_process:
+        #     self.ticker = t
+        #     idx = self.df.ticker == t
+        #     self.df = self.df[~idx]
+        #     ticker_df = self.__calc_ticker_stats__()
+        #     self.df = pd.concat([self.df, ticker_df])
 
-        self.ticker = save_ticker
+        # self.ticker = save_ticker
+
         self.heuristic(self.threshold)
         self.__set_good_tickers__()
         self.batched_days = []
