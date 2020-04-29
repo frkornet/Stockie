@@ -466,12 +466,14 @@ class Stats(object):
 
     def heuristic(self, threshold, verbose=True):
         self.threshold = threshold
-        idx = (self.df.daily_ret  > 0.0) \
-            & (self.df.pct_desired > threshold)
-        self.good_tickers = list(self.df.ticker.loc[idx].unique())
+        self.idx = (self.df.daily_ret  > 0.0) \
+                 & (self.df.pct_desired > threshold)
+        self.good_tickers = list(self.df.ticker.loc[self.idx].unique())
         log(f'len(self.good_tickers)={len(self.good_tickers)}')
+        self.df.good = 0
+        self.df.loc[self.idx].good = 1
 
-        self.__good_tickers_to_index__()
+        #self.__good_tickers_to_index__()
         if verbose == True:
             self.__log_heuristics_stats__()
 
@@ -512,8 +514,11 @@ class Stats(object):
 
     def __set_good_tickers__(self):
         self.df['good'] = 0
+        idx = self.df.ticker == ''
         for t in self.good_tickers:
-            self.df.good.loc[self.df.ticker == t] = 1
+            idx |= self.df.ticker == t
+
+        self.df.good.loc[idx] = 1
 
     def save_good_tickers(self, fnm):
 
@@ -554,7 +559,7 @@ class Stats(object):
         # self.ticker = save_ticker
 
         self.heuristic(self.threshold)
-        self.__set_good_tickers__()
+        #self.__set_good_tickers__()
         self.batched_days = []
 
 def test_add_day(stats):
