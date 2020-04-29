@@ -43,7 +43,6 @@ class Stats(object):
         self.train_fnm = train_fnm
         self.train_df = self.__read_trades__(train_fnm)
         assert len(self.train_df) > 0, "training data set cannot be empty"
-        #self.augment_train_df()
         gc.collect()
 
         self.test_fnm  = test_fnm
@@ -54,168 +53,9 @@ class Stats(object):
         self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
         self.batched_days = []
+        self.batched_idx  = self.test_df.sell_date == ''
         self.total_tickers = set(self.train_df.ticker.unique())
 
-    def __daily_return__(self, pct_gain, days):
-        daily_return = (1+pct_gain/100) ** (1/(days)) - 1
-        daily_return = round(daily_return * 100.0, 2)
-        return daily_return
-
-    def __daily_return_from_df__(self, ticker_df, pct_col):
-        ticker_df['ret'] = 1 + ticker_df[pct_col]/100
-        net_gain         = ticker_df.ret.product() - 1
-        net_gain         = net_gain * 100
-
-        if net_gain <= -100:
-            return -np.Inf
-
-        days = int(ticker_df.trading_days.sum())
-        return self.__daily_return__(net_gain, days)
-
-    def __init_gain_ticker_stats__(self):
-        self.cnt_gain      = 0
-        self.min_pct_gain  = 0
-        self.max_pct_gain  = 0
-        self.std_pct_gain  = 0
-        self.mean_pct_gain = 0
-        self.day_gain      = 0
-        self.gain_daily_return = 0
-
-    def __init_loss_ticker_stats__(self):
-        self.cnt_loss      = 0
-        self.min_pct_loss  = 0
-        self.max_pct_loss  = 0
-        self.std_pct_loss  = 0
-        self.mean_pct_loss = 0
-        self.day_loss      = 0
-        self.loss_daily_return = 0
-
-    def __init_zero_ticker_stats__(self):
-        self.cnt_zero      = 0
-        self.mean_day_zero = 0
-
-    def __init_tot_ticker_stats__(self):
-        self.total_days = 0
-        self.total_cnt  = 0
-        self.daily_ret  = -np.Inf
-
-    def __init_ticker_stats__(self):
-        self.__init_gain_ticker_stats__()
-        self.__init_loss_ticker_stats__()
-        self.__init_zero_ticker_stats__()
-        self.__init_tot_ticker_stats__()
-
-    def __calc_gain_ticker_stats__(self):
-        idx = (self.train_df.ticker == self.ticker) \
-            & (self.train_df.gain > 0)
-        ticker_df = self.train_df.loc[idx]
-        if len(ticker_df) == 0:  
-            return
-
-        pct_col = 'pct_gain'
-        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
-
-        self.cnt_gain       = len(ticker_df)
-        self.min_pct_gain   = ticker_df.pct_gain.min()
-        self.max_pct_gain   = ticker_df.pct_gain.max()
-        self.std_pct_gain   = ticker_df.pct_gain.std()
-        self.mean_pct_gain  = ticker_df.pct_gain.mean()
-        self.mean_day_gain  = float(ticker_df.trading_days.mean())
-        self.gain_daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
-
-    def __calc_loss_ticker_stats__(self):
-        idx = (self.train_df.ticker == self.ticker) \
-            & (self.train_df.gain < 0)
-        ticker_df = self.train_df.loc[idx]
-        if len(ticker_df) == 0:  
-            return
-
-        pct_col = 'pct_loss'
-        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
-
-        self.cnt_loss       = len(ticker_df)
-        self.min_pct_loss   = ticker_df.pct_loss.min()
-        self.max_pct_loss   = ticker_df.pct_loss.max()
-        self.std_pct_loss   = ticker_df.pct_loss.std()
-        self.mean_pct_loss  = ticker_df.pct_loss.mean()
-        self.mean_day_loss  = float(ticker_df.trading_days.mean())
-        self.loss_daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
-
-    def __calc_zero_ticker_stats__(self):
-        idx = (self.train_df.ticker == self.ticker) \
-            & (self.train_df.gain == 0)
-        ticker_df = self.train_df.loc[idx]
-
-        self.cnt_zero = len(ticker_df)
-        if self.cnt_zero > 0:
-            self.mean_day_zero = float(ticker_df.trading_days.mean())
-
-    def __calc_tot_ticker_stats__(self): 
-        idx = (self.train_df.ticker == self.ticker)
-        ticker_df = self.train_df.loc[idx]
-        if len(ticker_df) == 0:
-            return
-
-        pct_col = 'pct_gain'
-        ticker_df[pct_col] = (ticker_df.gain / ticker_df.buy_close) * 100
-
-        self.total_cnt  = self.cnt_gain + self.cnt_loss + self.cnt_zero
-        self.total_days = int(ticker_df.trading_days.sum())
-        self.daily_ret = self.__daily_return_from_df__(ticker_df, pct_col)
-
-        desired_cnt   = len(ticker_df[ticker_df.daily_return > 0.5])
-        len_ticker_df = len(ticker_df)
-        pct_desired   = (desired_cnt / len_ticker_df) * 100
-        self.pct_desired   = round(pct_desired, 2)
-
-        self.gain_ratio = self.cnt_gain / self.total_cnt       
-
-    def __ticker_stats_to_df__(self):
-        t_dict = {
-            'ticker'        : [self.ticker], 
-
-            'cnt_gain'      : [self.cnt_gain],
-            'min_pct_gain'  : [self.min_pct_gain],
-            'max_pct_gain'  : [self.max_pct_gain],
-            'std_pct_gain'  : [self.std_pct_gain], 
-            'mean_pct_gain' : [self.mean_pct_gain],
-            'mean_day_gain' : [self.mean_day_gain],   
-            'gain_daily_ret': [self.gain_daily_ret],
-
-            'cnt_loss'      : [self.cnt_loss],
-            'min_pct_loss'  : [self.min_pct_loss],
-            'max_pct_loss'  : [self.max_pct_loss],
-            'std_pct_loss'  : [self.std_pct_loss], 
-            'mean_pct_loss' : [self.mean_pct_loss],
-            'mean_day_loss' : [self.mean_day_loss],   
-            'loss_daily_ret': [self.loss_daily_ret],
-            
-            'cnt_zero'      : [self.cnt_zero],
-            'mean_day_zero' : [self.mean_day_zero],   
- 
-            'total_cnt'     : [self.cnt_gain + self.cnt_loss + self.cnt_zero],
-            'total_days'    : [self.total_days],
-            'mean_day'      : [self.total_days / self.total_cnt],
-            'daily_ret'     : [self.daily_ret],
-
-            'pct_desired'   : [self.pct_desired],
-            'gain_ratio'    : [self.gain_ratio],
-            'good'          : [ 0 ]
-            }
-
-        return dict_to_dataframe(t_dict, STAT_COL_TYPES)
-
-    def __calc_ticker_stats__(self):
-        self.__init_ticker_stats__()
-
-        self.__calc_gain_ticker_stats__()
-        self.__calc_loss_ticker_stats__()
-        self.__calc_zero_ticker_stats__()
-        self.__calc_tot_ticker_stats__()
-        gc.collect()
-        
-        return self.__ticker_stats_to_df__()
-    
     def desired_stats(self):
         idx = self.train_df.dret > 0.5
         ddf = self.train_df.loc[idx].groupby(by='ticker')['dret'].count().reset_index()
@@ -387,41 +227,12 @@ class Stats(object):
         cdf['gain_ratio'] = round((cdf.cnt_gain / cdf.total_cnt) * 100, 2)
         cdf['good'] = 0
 
-        self.df = cdf
+        self.df = cdf.copy()
 
         gc.collect()
  
     def calc_stats(self):
         self.create_stats()
-        # self.train_df['gain'] = self.train_df.sell_close - self.train_df.buy_close
-        # tickers = list(self.train_df.ticker.unique())
-
-        # self.df = empty_dataframe(STAT_COLS, STAT_COL_TYPES)
-        # save_ticker = self.ticker
-        # for t in tqdm(tickers, "Stats:"):
-        #     gc.collect()
-        #     self.ticker = t
-        #     self.df = pd.concat( [self.df, self.__calc_ticker_stats__()], 
-        #                         sort=False )
-
-        # self.ticker = save_ticker
-        # log('')
-        # log(f'\n{self.df.describe()}')
-
-    def plot_trades(self):
-        fig, axs = plt.subplots(2)
-
-        self.train_df.plot.scatter(x='trading_days', y='gain_pct', ax=axs[0], 
-                                   figsize=(18,12))
-
-        self.test_df.plot.scatter(x='trading_days',  y='gain_pct', ax=axs[1], 
-                                  figsize=(18,12))
-
-        title_str = 'Possible trades: trading days vs percentage gain'
-        axs[0].set_title(title_str + '(training set)')
-        axs[1].set_title(title_str + '(test set)')
-
-        plt.savefig(f'{PICPATH}stats_scatter.png')
 
     def __sum_n_count__(self, df):
         if len(df) == 0:
@@ -453,11 +264,6 @@ class Stats(object):
         log('ratios for all tickers self.train_df:')
         self.__calc_n_print_ratios__(self.train_df)
 
-    def __good_tickers_to_index__(self):
-        self.idx = self.df.ticker == ''
-        for t in self.good_tickers:
-            self.idx |= self.df.ticker == t
-
     def __log_heuristics_stats__(self):
         log(f'len(self.df)={len(self.df)}')
         log(f'len(self.df[idx])={len(self.df[self.idx])}')
@@ -468,33 +274,23 @@ class Stats(object):
         self.threshold = threshold
         self.idx = (self.df.daily_ret  > 0.0) \
                  & (self.df.pct_desired > threshold)
-        self.good_tickers = list(self.df.ticker.loc[self.idx].unique())
-        log(f'len(self.good_tickers)={len(self.good_tickers)}')
+        
         self.df.good = 0
-        self.df.loc[self.idx].good = 1
+        self.df.loc[self.idx, 'good'] = 1
 
-        #self.__good_tickers_to_index__()
         if verbose == True:
             self.__log_heuristics_stats__()
 
-
     def __good_subset_posible_trades__(self):
-        cols = list(self.train_df.columns)
-        self.good_df = empty_dataframe(TRADE_COLS, TRADE_COL_TYPES)
-        for t in self.good_tickers:
-            gc.collect()
-            idx = self.train_df.ticker == t
-            df = self.train_df.loc[idx]
-            if len(df) > 0:
-                self.good_df = pd.concat([self.good_df, df])
 
-    def good_ticker_ratios(self):
-        self.__good_subset_posible_trades__()
-        log('ratios for good tickers:')
-        self.__calc_n_print_ratios__(self.good_df)
+        cols = ['ticker', 'good']
+        tdf = pd.merge(left=self.train_df, right=self.df[cols], \
+                       on='ticker', how='inner')
+        self.good_df = tdf.loc[tdf.good == 1]
 
     def __log_save_stats__(self):
 
+        self.__good_subset_posible_trades__()
         good_len = len(self.good_df)
         train_df_len = len(self.train_df)
 
@@ -512,18 +308,11 @@ class Stats(object):
         log(f'good ticker share ={share}%')
         log('')
 
-    def __set_good_tickers__(self):
-        self.df['good'] = 0
-        idx = self.df.ticker == ''
-        for t in self.good_tickers:
-            idx |= self.df.ticker == t
+    def save_good_tickers(self, fnm, verbose=True):
 
-        self.df.good.loc[idx] = 1
-
-    def save_good_tickers(self, fnm):
-
-        self.__set_good_tickers__()
-        self.__log_save_stats__()
+        #self.__set_good_tickers__()
+        if verbose == True:
+            self.__log_save_stats__()
         save_dataframe_to_csv(self.df, fnm)
 
     def add_day(self, trading_date):
@@ -534,33 +323,26 @@ class Stats(object):
             return
         
         self.batched_days.append(trading_date)
-        if len(self.batched_days) < STAT_BATCH_SIZE:
+        self.batched_idx |= self.test_df.sell_date == trading_date
+        train_tickers = set(self.test_df[self.batched_idx].ticker.unique())
+        good_tickers = set(self.df.loc[self.df.good == 1].ticker.unique())
+        common_tickers = train_tickers & good_tickers
+        if len(common_tickers) < len(good_tickers) * STAT_BATCH_SIZE:
             return
 
-        idx = self.test_df.sell_date == ''
-        for d in self.batched_days:
-            idx |= self.test_df.sell_date == d
+        tickers_to_process = list(self.test_df \
+            .loc[self.batched_idx].ticker.unique())
 
-        tickers_to_process = list(self.test_df.loc[idx].ticker.unique())
         log(f'Processing {self.batched_days}')
         log(f'Unique tickers={len(tickers_to_process)}')
 
-        self.train_df = pd.concat([self.train_df, self.test_df.loc[idx]])
+        self.train_df = pd.concat([self.train_df, 
+                                   self.test_df.loc[self.batched_idx]])
         self.calc_stats()
 
-        # save_ticker = self.ticker
-        # for t in tickers_to_process:
-        #     self.ticker = t
-        #     idx = self.df.ticker == t
-        #     self.df = self.df[~idx]
-        #     ticker_df = self.__calc_ticker_stats__()
-        #     self.df = pd.concat([self.df, ticker_df])
-
-        # self.ticker = save_ticker
-
         self.heuristic(self.threshold)
-        #self.__set_good_tickers__()
         self.batched_days = []
+        self.batched_idx  = self.test_df.sell_date == ''
 
 def test_add_day(stats):
     log('Test add_day() functionality for non-existing trading date:')
@@ -579,15 +361,8 @@ def stats_main():
     log('Calculating individual ticker stats...\n')
     stats.calc_stats()
 
-    log('Plotting the self.train_df and self.test_df scatter plots...\n')
-    stats.plot_trades()
-
-    log('Printing the stats.df ratios...\n')
-    stats.train_df_ratios()
-
-    log('Determining the good tickers and printing the ratios...\n')
+    log('Setting threshold for pct_desired > 10...')
     stats.heuristic(10)
-    stats.good_ticker_ratios()
 
     log('Saving the ticker stats (including good)...')
     stats.save_good_tickers(STATS_FNM)

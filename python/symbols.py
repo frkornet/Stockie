@@ -43,4 +43,4 @@ STAT_COL_TYPES  = [str,
                    int, float,
                    int, int, float, float, float, float, int
                    ]
-STAT_BATCH_SIZE = 5
+STAT_BATCH_SIZE = 0.2
