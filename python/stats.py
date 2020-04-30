@@ -4,7 +4,9 @@ from symbols import TRAIN_TRADE_FNM, TEST_TRADE_FNM, STATS_FNM, LOGPATH, \
                     PICPATH, STAT_COLS,STAT_COL_TYPES, TRADE_COLS, \
                     TRADE_COL_TYPES, STAT_BATCH_SIZE
 from util    import open_logfile, log, is_holiday, get_current_day_and_time, \
-                    empty_dataframe, dict_to_dataframe, save_dataframe_to_csv
+                    empty_dataframe, dict_to_dataframe, save_dataframe_to_csv,\
+                    add_months
+
 from tqdm    import tqdm
 
 import matplotlib.pyplot as plt
@@ -49,12 +51,22 @@ class Stats(object):
         self.test_df = self.__read_trades__(test_fnm)
         gc.collect()
 
-    def __init__(self, train_fnm, test_fnm):
+    def parse_keep(self, keep):
+        months = int(keep[0:-1])
+        assert months >= 0, "only positive amounts are allowed!"
+        if keep[-1] == "y" or keep[-1]== "Y":
+            months = months * 12
+        else:
+            assert keep[-1] == "m" or keep[-1]== "M", "only m and y allowed!"
+        self.months = months
+
+    def __init__(self, train_fnm, test_fnm, keep="0m"):
         self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
         self.batched_days = []
         self.batched_idx  = self.test_df.sell_date == ''
         self.total_tickers = set(self.train_df.ticker.unique())
+        self.parse_keep(keep)
 
     def desired_stats(self):
         idx = self.train_df.dret > 0.5
@@ -232,6 +244,12 @@ class Stats(object):
         gc.collect()
  
     def calc_stats(self):
+        if self.months > 0:
+            max_date = max(self.train_df.sell_date)
+            latest_date = add_months(max_date, -self.months)
+            idx = self.train_df.sell_date <= latest_date
+            self.train_df = self.train_df.loc[~idx]
+
         self.create_stats()
 
     def __sum_n_count__(self, df):
@@ -315,6 +333,14 @@ class Stats(object):
             self.__log_save_stats__()
         save_dataframe_to_csv(self.df, fnm)
 
+    def __drop_and_calc_stats__(self):
+        # drop done by calc_stats
+        self.calc_stats()
+
+        self.heuristic(self.threshold)
+        self.batched_days = []
+        self.batched_idx  = self.test_df.sell_date == ''
+
     def add_day(self, trading_date):
 
         idx = self.test_df.sell_date == trading_date
@@ -338,11 +364,8 @@ class Stats(object):
 
         self.train_df = pd.concat([self.train_df, 
                                    self.test_df.loc[self.batched_idx]])
-        self.calc_stats()
-
-        self.heuristic(self.threshold)
-        self.batched_days = []
-        self.batched_idx  = self.test_df.sell_date == ''
+        
+        self.__drop_and_calc_stats__()
 
 def test_add_day(stats):
     log('Test add_day() functionality for non-existing trading date:')
@@ -356,7 +379,7 @@ def test_add_day(stats):
 def stats_main():
     log("Starting stats.py")
     log('')
-    stats = Stats(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
+    stats = Stats(TRAIN_TRADE_FNM, TEST_TRADE_FNM, "24m")
 
     log('Calculating individual ticker stats...\n')
     stats.calc_stats()

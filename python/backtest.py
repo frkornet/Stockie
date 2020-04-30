@@ -409,7 +409,7 @@ def backtest_main():
     loss_dict = {}
 
     # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    thresholds = [10, 20, 30]
+    thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     for th in thresholds:
         bt.pct_desired(th)
         bt.run_back_test(10000, 5)
