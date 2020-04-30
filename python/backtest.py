@@ -24,7 +24,7 @@ from datetime                import datetime, timedelta
 from util                    import open_logfile, log, get_stock_period, \
                                     build_ticker_list, is_holiday, \
                                     get_current_day_and_time, add_days_to_date, \
-                                    set_to_string, add_spaces
+                                    set_to_string, add_spaces, dict_to_dataframe
 
 from pnl                     import Capital, PnL
 from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
@@ -204,6 +204,10 @@ class Backtester(object):
         self.myPnL.buy_stock(self.ticker, self.buy_date, 
                 self.sell_date, self.amount)
 
+        # something went wrong (e.g. unable to retrieve hist data)
+        if self.ticker not in self.myPnL.invested.keys():
+            return
+        
         if self.sell_date in self.sell_dates:
             self.sell_dates[self.sell_date].append(self.ticker)
         else:
@@ -231,26 +235,74 @@ class Backtester(object):
             to_sell = self.sell_dates.pop(self.trading_date, [])
             self.sell_stocks(to_sell)
 
+    def buy_stocks(self, to_buy):
+        self.buy_date = self.trading_date
+        for t in to_buy:
+            self.ticker = t
+            self.calc_amount()
+            idx = (self.possible_trades_df.ticker == t) \
+                & (self.possible_trades_df.buy_date == self.buy_date)
+            self.sell_date = self.possible_trades_df.sell_date.loc[idx].min()
+            self.buy_stock()
+
     def process_buy_opportunities(self):
-        if self.i_possible_trades >= len(self.possible_trades):
-            return
+        # if self.i_possible_trades >= len(self.possible_trades):
+        #     return
         
-        self.extract_dates_n_ticker()
-        while self.trading_date == self.buy_date:
-            idx = self.ticker_stats_df.ticker == self.ticker
-            self.daily_ret = float(self.ticker_stats_df[self.ret_col].loc[idx])
-            if self.daily_ret > 0:
-                self.calc_amount()
-                if len(self.myPnL.invested) >= self.max_stocks:
-                    self.find_stock_to_replace()
+        # self.extract_dates_n_ticker()
+        # while self.trading_date == self.buy_date:
+        #     idx = self.ticker_stats_df.ticker == self.ticker
+        #     self.daily_ret = float(self.ticker_stats_df[self.ret_col].loc[idx])
+        #     if self.daily_ret > 0:
+        #         self.calc_amount()
+        #         if len(self.myPnL.invested) >= self.max_stocks:
+        #             self.find_stock_to_replace()
 
-                self.buy_stock_if_possible()
+        #         self.buy_stock_if_possible()
 
-            # move to next possible trading opportunity
-            if self.next_possible_trade_index() == False:
-                break
+        #     # move to next possible trading opportunity
+        #     if self.next_possible_trade_index() == False:
+        #         break
 
-            self.extract_dates_n_ticker()
+        #     self.extract_dates_n_ticker()
+
+        # create dataframe for stocks owned
+        own_set = set(self.myPnL.invested.keys())
+        o_dict = {'ticker' : list(own_set), 'own' : [1]*len(own_set)}
+        odf = dict_to_dataframe(o_dict, [str, int])
+
+        cols = ['ticker', self.ret_col]
+        odf = pd.merge(left=odf, 
+                        right=self.ticker_stats_df[cols],
+                        on='ticker', how='inner')
+
+        # create dataframe for possible buys        
+        cols = ['ticker', 'sell_date']
+        self.buy_date = self.trading_date
+        idx = self.possible_trades_df.buy_date == self.buy_date
+        tdf = self.possible_trades_df[cols].loc[idx].copy()
+        tdf['own'] = 0
+
+        cols = ['ticker', self.ret_col, 'pct_desired']
+        tdf = pd.merge(left=tdf, 
+                        right=self.ticker_stats_df[cols],
+                        on='ticker', how='inner')
+
+        # only consider 'good' ticker for buying
+        idx = (tdf[self.ret_col] > 0.0) \
+            & (tdf.pct_desired >= self.threshold)
+        tdf=tdf.loc[idx]
+
+        # concat, sort and determine final_set
+        df = pd.concat([odf, tdf]).sort_values(by=self.ret_col, ascending=False)
+        #log(df, True)
+        final_set = set(df.ticker.iloc[0:self.max_stocks])
+
+        to_sell = own_set - final_set
+        self.sell_stocks(to_sell)
+
+        to_buy = final_set - own_set
+        self.buy_stocks(to_buy)
 
     def close_day(self):
         day = self.trading_date
@@ -409,7 +461,7 @@ def backtest_main():
     loss_dict = {}
 
     # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    thresholds = [0]
     for th in thresholds:
         bt.pct_desired(th)
         bt.run_back_test(10000, 5)
