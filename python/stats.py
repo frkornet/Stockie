@@ -51,6 +51,8 @@ class Stats(object):
         self.test_df = self.__read_trades__(test_fnm)
         gc.collect()
 
+        self.calc_stats()
+
     def parse_keep(self, keep):
         months = int(keep[0:-1])
         assert months >= 0, "only positive amounts are allowed!"
@@ -61,12 +63,13 @@ class Stats(object):
         self.months = months
 
     def __init__(self, train_fnm, test_fnm, keep="0m"):
+        self.parse_keep(keep)
         self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
         self.batched_days = []
         self.batched_idx  = self.test_df.sell_date == ''
         self.total_tickers = set(self.train_df.ticker.unique())
-        self.parse_keep(keep)
+
 
     def desired_stats(self):
         idx = self.train_df.dret > 0.5
@@ -353,7 +356,7 @@ class Stats(object):
         train_tickers = set(self.test_df[self.batched_idx].ticker.unique())
         good_tickers = set(self.df.loc[self.df.good == 1].ticker.unique())
         common_tickers = train_tickers & good_tickers
-        if len(common_tickers) < len(good_tickers) * STAT_BATCH_SIZE:
+        if len(common_tickers) <= len(good_tickers) * STAT_BATCH_SIZE:
             return
 
         tickers_to_process = list(self.test_df \

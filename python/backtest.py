@@ -12,24 +12,25 @@
 # Version:  0.2
 #
 
-import pandas                as pd
-import numpy                 as np
-import matplotlib.pyplot     as plt
+import pandas               as pd
+import numpy                as np
+import matplotlib.pyplot    as plt
 import gc; gc.enable()
 
-from tqdm                    import tqdm
-from time                    import sleep, time
-from datetime                import datetime, timedelta
+from tqdm                   import tqdm
+from time                   import sleep, time
+from datetime               import datetime, timedelta
 
-from util                    import open_logfile, log, get_stock_period, \
-                                    build_ticker_list, is_holiday, \
-                                    get_current_day_and_time, add_days_to_date, \
-                                    set_to_string, add_spaces, dict_to_dataframe
+from util                   import open_logfile, log, get_stock_period, \
+                                   build_ticker_list, is_holiday, \
+                                   get_current_day_and_time, add_days_to_date, \
+                                   set_to_string, add_spaces, dict_to_dataframe
 
-from pnl                     import Capital, PnL
-from symbols                 import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
-                                    STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
-                                    BUY_FNM, TRADE_COLS
+from pnl                    import Capital, PnL
+from symbols                import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
+                                   STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
+                                   TRAIN_TRADE_FNM, BUY_FNM, TRADE_COLS
+from stats                  import Stats
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -40,7 +41,8 @@ class Backtester(object):
         idx = self.buy_opportunities_df.buy_date >= \
               max(self.possible_trades_df.buy_date)
         br_df = pd.merge(self.buy_opportunities_df[idx], 
-                         self.ticker_stats_df[cols], how='inner')
+                         # self.ticker_stats_df[cols], how='inner')
+                         self.stats.df[cols], how='inner')
 
         br_df['gain_pct']= br_df.mean_pct_gain.astype(float)
         br_df['trading_days'] = round(br_df.mean_day, 0).astype(int)
@@ -64,14 +66,22 @@ class Backtester(object):
         self.possible_trades_df = pd.concat([self.possible_trades_df, br_df])
         gc.collect()
 
-    def __init__(self):
+    def __init__(self, keep="3m", threshold=20, update_stats=True):
         log(f"Initializing backtester class: ")
 
         # Read ticker statistics
-        self.ticker_stats_df = pd.read_csv(STATS_FNM)
-        idx = self.ticker_stats_df.good == 1
-        self.tickers = self.ticker_stats_df[idx].ticker.to_list()
-        log(f"tickers={self.tickers} len(tickers)={len(self.tickers)}\n\n")
+        # self.ticker_stats_df = pd.read_csv(STATS_FNM)
+        # idx = self.ticker_stats_df.good == 1
+        # self.tickers = self.ticker_stats_df[idx].ticker.to_list()
+        # log(f"tickers={self.tickers} len(tickers)={len(self.tickers)}\n\n")
+
+        # Create a Stats instance and create ticker stats for it
+        self.stats = Stats(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
+        self.stats.calc_stats()
+        self.threshold = threshold
+        self.keep = keep
+        self.update_stats = update_stats
+        self.stats.heuristic(self.threshold, verbose=False)
 
         # Read possible trades and buy opportunities
         self.possible_trades_df = pd.read_csv(TEST_TRADE_FNM)
@@ -100,12 +110,13 @@ class Backtester(object):
     def pct_desired(self, threshold):
         # Read ticker statistics
         self.threshold = threshold
-        self.ticker_stats_df = pd.read_csv(STATS_FNM)
-        idx = (self.ticker_stats_df.pct_desired >= threshold) \
-            & (self.ticker_stats_df.daily_ret > 0)
-        self.tickers = self.ticker_stats_df[idx].ticker.to_list()
-        self.len_tickers = len(self.tickers)
-        log(f"pct_desired({threshold}):len_tickers={self.len_tickers}\n\n")
+        self.stats.heuristic(self.threshold, verbose=False)
+        # self.ticker_stats_df = pd.read_csv(STATS_FNM)
+        # idx = (self.ticker_stats_df.pct_desired >= threshold) \
+        #     & (self.ticker_stats_df.daily_ret > 0)
+        # self.tickers = self.ticker_stats_df[idx].ticker.to_list()
+        # self.len_tickers = len(self.tickers)
+        # log(f"pct_desired({threshold}):len_tickers={self.len_tickers}\n\n")
 
     def log_invested(self, message):
         log(message)
@@ -116,14 +127,7 @@ class Backtester(object):
         log(message)
         log(f"capital={self.myPnL.capital} in_use={self.myPnL.in_use}"
             f" free={self.myPnL.free}")
-    
-    # TODO: rewrite when implementing dynamic ticker_stats_df updates
-    # def sort_possible_trades(self):
-    #     self.possible_trades_df = pd.merge(self.possible_trades_df, 
-    #         self.ticker_stats_df[['ticker', self.ret_col]], how='inner')
-    #     self.possible_trades = self.possible_trades_df.sort_values(
-    #         by=['buy_date', self.ret_col], ascending=[True, False])
-    #     self.possible_trades = self.possible_trades.reset_index()
+
 
     def init_back_test_run(self, capital, max_stocks):
         log("starting backtester")
@@ -194,7 +198,8 @@ class Backtester(object):
 
         cols = ['ticker', self.ret_col]
         odf = pd.merge(left=odf, 
-                        right=self.ticker_stats_df[cols],
+                        # right=self.ticker_stats_df[cols],
+                        right=self.stats.df[cols],
                         on='ticker', how='inner')
 
         # create dataframe for possible buys        
@@ -206,7 +211,8 @@ class Backtester(object):
 
         cols = ['ticker', self.ret_col, 'pct_desired']
         tdf = pd.merge(left=tdf, 
-                        right=self.ticker_stats_df[cols],
+                        # right=self.ticker_stats_df[cols],
+                        right=self.stats.df[cols],
                         on='ticker', how='inner')
 
         # only consider 'good' ticker for buying
@@ -252,28 +258,6 @@ class Backtester(object):
         log(f'day\t\tcapital\tfree\tin_use\t{h}\t{s}\t{b}')
         log(f'===\t\t=======\t====\t======\t{u}\t{u}\t{u}')
 
-
-    def update_stats_for_ticker(self, ticker_df):
-        ticker = ticker_df.ticker.unique()
-        assert len(ticker_df) == 1, "expected to be one row..."
-        tdf = ticker_df.copy()
-        tdf['gain'] = tdf.sell_close - tdf.buy_close
-        gain = tdf.gain.max()
-
-        # to be expanded ...
-
-    def update_ticker_stats(self):
-        idx = self.possible_trades_df.sell_date == self.trading_date
-        df = self.possible_trades_df.loc[idx].copy()
-        if len(df) == 0:
-            return
-
-        tickers_to_check = list(df.ticker.unique())
-        for t in tickers_to_check:
-            if t in self.tickers:
-                idx = df.ticker == t
-                self.update_stats_for_ticker(df.loc[idx])
-
     def main_back_test_loop(self):
 
         self.print_heading()
@@ -289,7 +273,8 @@ class Backtester(object):
             self.process_buy_opportunities()
             self.end_invested = self.myPnL.invested.copy()
             self.close_day()
-            #self.update_ticker_stats()
+            if self.update_stats == True:
+                self.stats.add_day(self.trading_date)
 
     def run_back_test(self, capital, max_stocks):
         self.init_back_test_run(capital, max_stocks)
@@ -375,7 +360,7 @@ class Backtester(object):
 def backtest_main():
     start_time = time()
 
-    bt = Backtester()
+    bt = Backtester(update_stats=False)
 
     capital_dict = {}
     invested_dict = {}
@@ -386,6 +371,8 @@ def backtest_main():
     # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     for th in thresholds:
+        if th >= 10:
+            bt.stats.reset_trade_files(TRAIN_TRADE_FNM, TEST_TRADE_FNM)            
         bt.pct_desired(th)
         bt.run_back_test(10000, 5)
         log('', True)
@@ -396,7 +383,8 @@ def backtest_main():
         # save key stats of run 
         capital_dict[th]      = bt.myPnL.capital
         invested_dict[th]     = bt.myPnL.invested.keys()
-        len_tickers_dict[th]  = bt.len_tickers
+        good_tickers = bt.stats.df.loc[bt.stats.df.good == 1].ticker
+        len_tickers_dict[th]  = len(good_tickers)
         gains_dict[th]        = gains
         loss_dict[th]         = losses
 
@@ -430,7 +418,7 @@ def backtest_main():
     seconds = seconds - minutes * 60
     hours = int(minutes / 60)
     minutes = minutes - hours * 60
-    log(f'Run time (hh:mm:ss) : {hours}:{minutes}:{seconds}', True)
+    log(f'Run time (hh:mm:ss) : {hours:02d}:{minutes:02d}:{seconds:02d}', True)
 
 if __name__ == "__main__":
 
