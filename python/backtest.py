@@ -29,7 +29,8 @@ from util                   import open_logfile, log, get_stock_period, \
 from pnl                    import Capital, PnL
 from symbols                import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
                                    STOP_LOSS, STATS_FNM, TEST_TRADE_FNM, \
-                                   TRAIN_TRADE_FNM, BUY_FNM, TRADE_COLS
+                                   TRAIN_TRADE_FNM, BUY_FNM, TRADE_COLS, \
+                                   BT_DRET_COL
 from stats                  import Stats
 
 import warnings; warnings.filterwarnings("ignore")
@@ -39,7 +40,7 @@ class Backtester(object):
     def augment_possible_trades_with_buy_opportunities(self):
         cols =[ 'ticker', 'mean_pct_gain', 'mean_day', self.ret_col ]
         idx = self.buy_opportunities_df.buy_date >= \
-              max(self.possible_trades_df.buy_date)
+              max(self.stats.test_df.buy_date)
         br_df = pd.merge(self.buy_opportunities_df[idx], 
                          # self.ticker_stats_df[cols], how='inner')
                          self.stats.df[cols], how='inner')
@@ -63,7 +64,7 @@ class Backtester(object):
             f'{br_df.sort_values(by=cols, ascending=[True, False])}')
         log('')
 
-        self.possible_trades_df = pd.concat([self.possible_trades_df, br_df])
+        self.stats.test_df = pd.concat([self.stats.test_df, br_df])
         gc.collect()
 
     def __init__(self, keep="3m", threshold=20, update_stats=True):
@@ -83,17 +84,16 @@ class Backtester(object):
         self.update_stats = update_stats
         self.stats.heuristic(self.threshold, verbose=False)
 
-        # Read possible trades and buy opportunities
-        self.possible_trades_df = pd.read_csv(TEST_TRADE_FNM)
+        # Read buy opportunities
         self.buy_opportunities_df = pd.read_csv(BUY_FNM)
 
         # Augment buy recommendations
-        self.ret_col = 'daily_ret' #'gain_daily_ret'
+        self.ret_col = BT_DRET_COL
         self.augment_possible_trades_with_buy_opportunities()
 
         # Determine start and end date for backtesting period.
-        self.start_date = min(self.possible_trades_df.buy_date)
-        self.end_date   = max(self.possible_trades_df.sell_date)
+        self.start_date = min(self.stats.test_df.buy_date)
+        self.end_date   = max(self.stats.test_df.sell_date)
         self.start_date = add_days_to_date(self.start_date, -5)
         self.end_date   = add_days_to_date(self.end_date, 5)
 
@@ -148,7 +148,7 @@ class Backtester(object):
         self.sell_dates   = {}
 
         log('', True)
-        log(f"Possible trades to simulate: {len(self.possible_trades_df)}", True)
+        log(f"Possible trades to simulate: {len(self.stats.test_df)}", True)
         log(f"Trading days to simulate   : "
             f"{len(self.backtest_trading_dates)}", True)
         log(f'Pct_desired threshold      : {self.threshold}\n', True)
@@ -185,9 +185,9 @@ class Backtester(object):
         for t in to_buy:
             self.ticker = t
             self.calc_amount()
-            idx = (self.possible_trades_df.ticker == t) \
-                & (self.possible_trades_df.buy_date == self.buy_date)
-            self.sell_date = self.possible_trades_df.sell_date.loc[idx].min()
+            idx = (self.stats.test_df.ticker == t) \
+                & (self.stats.test_df.buy_date == self.buy_date)
+            self.sell_date = self.stats.test_df.sell_date.loc[idx].min()
             self.buy_stock()
 
     def process_buy_opportunities(self):
@@ -205,8 +205,8 @@ class Backtester(object):
         # create dataframe for possible buys        
         cols = ['ticker', 'sell_date']
         self.buy_date = self.trading_date
-        idx = self.possible_trades_df.buy_date == self.buy_date
-        tdf = self.possible_trades_df[cols].loc[idx].copy()
+        idx = self.stats.test_df.buy_date == self.buy_date
+        tdf = self.stats.test_df[cols].loc[idx].copy()
         tdf['own'] = 0
 
         cols = ['ticker', self.ret_col, 'pct_desired']
@@ -322,8 +322,8 @@ class Backtester(object):
     def possible_trades_df_scatter_plot(self):
         log('')
         fnm = f'{PICPATH}pos_trades_df_scatter_{self.threshold}.png'
-        log(f'Saving scatter plot self.possible_trades_df to {fnm}')
-        self.scatter_plot(self.possible_trades_df, 'trading_days', fnm)
+        log(f'Saving scatter plot self.stats.test_df to {fnm}')
+        self.scatter_plot(self.stats.test_df, 'trading_days', fnm)
 
     def calc_sum_n_count(self, df):
         s, c =  df['gain'].agg(['sum', 'count'])
@@ -369,7 +369,7 @@ def backtest_main():
     loss_dict = {}
 
     # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    thresholds = [20]
     for th in thresholds:
         if th >= 10:
             bt.stats.reset_trade_files(TRAIN_TRADE_FNM, TEST_TRADE_FNM)            

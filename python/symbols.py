@@ -44,3 +44,5 @@ STAT_COL_TYPES  = [str,
                    int, int, float, float, float, float, int
                    ]
 STAT_BATCH_SIZE = 0.05
+
+BT_DRET_COL     = "gain_daily_ret"
