@@ -62,13 +62,14 @@ class Stats(object):
             assert keep[-1] == "m" or keep[-1]== "M", "only m and y allowed!"
         self.months = months
 
-    def __init__(self, train_fnm, test_fnm, keep="0m"):
+    def __init__(self, train_fnm, test_fnm, keep="0m", batch_size=STAT_BATCH_SIZE):
         self.parse_keep(keep)
         self.reset_trade_files(train_fnm, test_fnm)
         self.ticker = ''
         self.batched_days = []
         self.batched_idx  = self.test_df.sell_date == ''
         self.total_tickers = set(self.train_df.ticker.unique())
+        self.batch_size = batch_size
 
 
     def desired_stats(self):
@@ -346,17 +347,19 @@ class Stats(object):
 
     def add_day(self, trading_date):
 
+        #self.test_df.reset_index()
+
         idx = self.test_df.sell_date == trading_date
         test_len = len(self.test_df.loc[idx])
         if test_len == 0:
             return
         
         self.batched_days.append(trading_date)
-        self.batched_idx |= self.test_df.sell_date == trading_date
+        self.batched_idx |= idx # self.test_df.sell_date == trading_date
         train_tickers = set(self.test_df[self.batched_idx].ticker.unique())
         good_tickers = set(self.df.loc[self.df.good == 1].ticker.unique())
         common_tickers = train_tickers & good_tickers
-        if len(common_tickers) <= len(good_tickers) * STAT_BATCH_SIZE:
+        if len(common_tickers) <= len(good_tickers) * self.batch_size:
             return
 
         tickers_to_process = list(self.test_df \

@@ -24,7 +24,8 @@ from datetime               import datetime, timedelta
 from util                   import open_logfile, log, get_stock_period, \
                                    build_ticker_list, is_holiday, \
                                    get_current_day_and_time, add_days_to_date, \
-                                   set_to_string, add_spaces, dict_to_dataframe
+                                   set_to_string, add_spaces, calc_runtime, \
+                                   dict_to_dataframe
 
 from pnl                    import Capital, PnL
 from symbols                import TOLERANCE, DATAPATH, LOGPATH, PICPATH, \
@@ -42,7 +43,6 @@ class Backtester(object):
         idx = self.buy_opportunities_df.buy_date >= \
               max(self.stats.test_df.buy_date)
         br_df = pd.merge(self.buy_opportunities_df[idx], 
-                         # self.ticker_stats_df[cols], how='inner')
                          self.stats.df[cols], how='inner')
 
         br_df['gain_pct']= br_df.mean_pct_gain.astype(float)
@@ -65,6 +65,8 @@ class Backtester(object):
         log('')
 
         self.stats.test_df = pd.concat([self.stats.test_df, br_df])
+        self.stats.test_df.reset_index()
+        self.stats.batched_idx = self.stats.test_df.sell_date == ''
         gc.collect()
 
     def __init__(self, keep="3m", threshold=20, update_stats=True):
@@ -151,7 +153,10 @@ class Backtester(object):
         log(f"Possible trades to simulate: {len(self.stats.test_df)}", True)
         log(f"Trading days to simulate   : "
             f"{len(self.backtest_trading_dates)}", True)
-        log(f'Pct_desired threshold      : {self.threshold}\n', True)
+        log(f'Update statistics          : {self.update_stats}', True)
+        log(f'Batch size                 : {self.stats.batch_size}', True)
+        log(f'Pct_desired threshold      : {self.threshold}', True)
+        log(f'Return column              : {self.ret_col}\n', True)
     
     def calc_amount(self):
         self.amount = self.myPnL.capital / self.max_stocks
@@ -265,7 +270,9 @@ class Backtester(object):
         for self.trading_day, self.trading_date in \
             enumerate(tqdm(self.backtest_trading_dates, 
                            desc="simulate trades: ")):
-            
+            if self.trading_day == 15:
+                log('')
+
             gc.collect()
             self.trading_date = str(self.trading_date)[:10]
             self.start_invested = self.myPnL.invested.copy()
@@ -357,68 +364,150 @@ class Backtester(object):
         self.sell_df.to_csv(fnm, index=False)
         return gains, losses
 
+def backtest_run(bt, p):
+    upd_stats, batch_size, th, ret_col = p
+    bt.pct_desired(th)
+    bt.run_back_test(10000, 5)
+    log('', True)
+    bt.log_PnL('myPnL=')
+    bt.log_invested('invested in:')
+    gains, losses = bt.print_backtest_stats()
+
+    # save key stats of run 
+    good_tickers = bt.stats.df.loc[bt.stats.df.good == 1].ticker
+    return { 
+            'upd_stats' : upd_stats,
+            'batch_size': batch_size,
+            'threshold' : th,
+            'ret_col'   : ret_col,
+            'capital'   : bt.myPnL.capital,
+            'invested'  : bt.myPnL.invested.keys(),
+            'len_good'  : len(good_tickers),
+            'gains'     : gains,
+            'losses'    : losses
+           }
+
+def plot_backtest_run(bt, th):
+    bt.myPnL.myCapital.df.index = bt.myPnL.myCapital.df.date
+    to_plot_cols = ['capital', 'in_use']
+    bt.myPnL.myCapital.df[to_plot_cols].plot(figsize=(18,10))
+    plt.savefig(f'{PICPATH}trade_threshold_{th}.png')
+
+# thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+thresholds =[
+            (True,  0.05,  0, "daily_ret"     ),
+            (False, 0.05,  0, "daily_ret"     ),
+            (True,  0.05,  0, "gain_daily_ret"),
+            (False,  0.05,  0, "gain_daily_ret"),
+
+            (True,  0.05, 10, "daily_ret"     ),
+            (False, 0.05, 10, "daily_ret"     ),
+            (True,  0.05, 10, "gain_daily_ret"),
+            (False,  0.05, 10, "gain_daily_ret"),
+
+            (True,  0.05, 20, "daily_ret"     ),
+            (False, 0.05, 20, "daily_ret"     ),
+            (True,  0.05, 20, "gain_daily_ret"),
+            (False, 0.05, 20, "gain_daily_ret"),
+
+            (True,  0.05, 30, "daily_ret"     ),
+            (False, 0.05, 30, "daily_ret"     ),
+            (True,  0.05, 30, "gain_daily_ret"),
+            (False, 0.05, 30, "gain_daily_ret")
+
+        ]
+
+summary_cols=[  "Update", "Batch", "Ret_col", "Threshold", "Capital", "Gains",
+                "Losses", "Return", "", "Len", "Invested'"]
+summary_heading_tabs=[ 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 0] 
+summary_value_tabs=  [ 1, 1, 1, 2, 1, 1, 1, 0, 1, 1, 0] 
+
+def run_back_set(bt):
+    run_dict = {}
+
+    for i, p in enumerate(thresholds):
+
+        if i > 0:
+            bt.stats.reset_trade_files(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
+            bt.augment_possible_trades_with_buy_opportunities()
+
+        upd_stats, batch_size, th, ret_col = p
+        bt.ret_col = ret_col
+        bt.update_stats = upd_stats
+        bt.stats.batch_size = batch_size
+
+        run_dict[i] = backtest_run(bt, p)
+        plot_backtest_run(bt, th)
+
+    return run_dict
+
+def print_summary_heading():
+    log('', True)
+    hs = ""
+    us = ""
+    for i, col in enumerate(summary_cols):
+        hs = hs + col
+        us = us + "=" * len(col)
+        tabs = summary_heading_tabs[i]
+        while tabs > 0:
+            hs = hs + "\t"
+            us = us + "\t"
+            tabs = tabs - 1
+
+    log(hs, True)
+    log(us, True)
+
+def extract_print_values(run_dict, k, trading_days):
+    upd_stats  = run_dict[k]["upd_stats"]
+    batch_size = run_dict[k]["batch_size"]
+    th         = run_dict[k]["threshold"]
+    ret_col    = run_dict[k]["ret_col"]
+    ret_col    = add_spaces(ret_col, 15)
+
+    cap    = run_dict[k]["capital"]
+    ret    = ( (cap/10000) ** (1/trading_days)) - 1
+    ret    = round (ret * 100, 2)
+
+    inv    = list(run_dict[k]["invested"])
+    inv    = set_to_string(inv, 30)
+    length = run_dict[k]["len_good"]
+    gains  = run_dict[k]["gains"]
+    losses = run_dict[k]["losses"]
+
+    cap   = int(round(cap/1000,0))
+    gains = int(round(gains/1000,0))
+    losses = int(round(losses/1000,0))
+
+    return [ upd_stats, batch_size, ret_col, th, cap, gains, 
+                losses, ret, "%", length, inv]
+
+def print_values(values):
+    msg = ""
+    for i, v in enumerate(values):
+        msg = msg + str(v)
+        tabs = summary_value_tabs[i]
+        while tabs > 0:
+            msg = msg + "\t"
+            tabs = tabs - 1
+    log(msg, True)
+
+def print_summary(trading_days, run_dict):
+    print_summary_heading()
+
+    for k in run_dict.keys():
+        values = extract_print_values(run_dict, k, trading_days)
+        print_values(values)
+
 def backtest_main():
     start_time = time()
-
     bt = Backtester(update_stats=False)
-
-    capital_dict = {}
-    invested_dict = {}
-    len_tickers_dict = {}
-    gains_dict = {}
-    loss_dict = {}
-
-    # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    thresholds = [20]
-    for th in thresholds:
-        if th >= 10:
-            bt.stats.reset_trade_files(TRAIN_TRADE_FNM, TEST_TRADE_FNM)            
-        bt.pct_desired(th)
-        bt.run_back_test(10000, 5)
-        log('', True)
-        bt.log_PnL('myPnL=')
-        bt.log_invested('invested in:')
-        gains, losses = bt.print_backtest_stats()
-
-        # save key stats of run 
-        capital_dict[th]      = bt.myPnL.capital
-        invested_dict[th]     = bt.myPnL.invested.keys()
-        good_tickers = bt.stats.df.loc[bt.stats.df.good == 1].ticker
-        len_tickers_dict[th]  = len(good_tickers)
-        gains_dict[th]        = gains
-        loss_dict[th]         = losses
-
-        bt.myPnL.myCapital.df.index = bt.myPnL.myCapital.df.date
-        to_plot_cols = ['capital', 'in_use']
-        bt.myPnL.myCapital.df[to_plot_cols].plot(figsize=(18,10))
-        plt.savefig(f'{PICPATH}trade_threshold_{th}.png')
-
-    # Print summary...
-    log('', True)
-    log('Threshold\tCapital\tGains\tLosses\tReturn\tLen\tInvested', True)
-    log('=========\t=======\t=====\t======\t======\t===\t========', True)
+    run_dict = run_back_set(bt)
     trading_days = len(bt.backtest_trading_dates)
-
-    for th in thresholds:
-        cap   = capital_dict[th]
-        ret   = ( (cap/10000) ** (1/trading_days)) - 1
-        ret   = round (ret * 100, 2)
-        inv   = set_to_string(list(invested_dict[th]), 30)
-        length   = len_tickers_dict[th]
-        cap   = int(round(cap/1000,0))
-        gains = int(round(gains_dict[th]/1000,0))
-        losses = int(round(loss_dict[th]/1000,0))
-        log(f'{th}\t\t{cap}\t{gains}\t{losses}\t{ret}%\t{length}\t{inv}', True)
+    print_summary(trading_days, run_dict)
 
     log('')
     log('Done.')
-
-    seconds = int(time() - start_time)
-    minutes = int(seconds / 60)
-    seconds = seconds - minutes * 60
-    hours = int(minutes / 60)
-    minutes = minutes - hours * 60
-    log(f'Run time (hh:mm:ss) : {hours:02d}:{minutes:02d}:{seconds:02d}', True)
+    calc_runtime(start_time, True)
 
 if __name__ == "__main__":
 

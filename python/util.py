@@ -3,10 +3,15 @@ import numpy                 as np
 import yfinance              as yf
 from   scipy.signal          import savgol_filter
 from   tqdm                  import tqdm
-from   time                  import sleep, strftime, strptime
+from   time                  import sleep, strftime, strptime, time
 from   datetime              import timedelta, datetime, date
 from   logging               import info, basicConfig, DEBUG, INFO
 from   symbols               import STOCKS_FNM, EXCLUDE_FNM, EXCLUDE_SET
+
+
+################################
+### Logging helper functions ###
+################################
 
 def open_logfile(logpath, fnm):
     basicConfig(
@@ -19,9 +24,10 @@ def log(msg, both=False):
     if both == True:
         print(msg)
 
-#
-# Date helper functions
-#
+#############################
+### Date helper functions ###
+#############################
+
 def get_current_day_and_time(fmt='%Y%m%d%H%M'):
     return strftime(fmt)
 
@@ -151,6 +157,25 @@ def is_holiday():
     today = get_current_day()
     return today in Market_Holidays
 
+##########################################
+### Calculate runtime helper functions ###
+##########################################
+
+def get_starttime():
+    return time()
+
+def calc_runtime(start_time, verbose):
+    seconds = int(time() - start_time)
+    minutes = int(seconds / 60)
+    seconds = seconds - minutes * 60
+    hours = int(minutes / 60)
+    minutes = minutes - hours * 60
+    log(f'Run time (hh:mm:ss) : {hours:02d}:{minutes:02d}:{seconds:02d}', verbose)
+
+#############################################
+### Get stock and smooth helper functions ###
+#############################################
+
 def smooth(hist, ticker):
     """
     Smooth the Close price curve of hist data frame returned by yfinance. Two
@@ -214,6 +239,10 @@ def get_stock_start(ticker, times, start, end):
     hist=pd.DataFrame(columns=['Open', 'Close', 'High', 'Low'])
     return False, hist
 
+############################################
+### Print ticker header helper functions ###
+############################################
+
 def print_ticker_heading(ticker):
     """
     Print a heading for the ticker on the console. Nothing is returned. Is
@@ -224,6 +253,10 @@ def print_ticker_heading(ticker):
     print("***", ticker, " "*6, "***" )
     print("*******************")
     print('')
+
+###############################
+### Ticker helper functions ###
+###############################
 
 def exclude_tickers(tickers, exclude_list):
     t_list = []
@@ -253,6 +286,10 @@ def build_ticker_list():
     log("")
 
     return tickers
+
+###############################
+### Pandas helper functions ###
+###############################
 
 def empty_dataframe(cols, data_types):
     assert len(cols) == len(data_types), "len(cols) <> len(data_types)"
@@ -286,6 +323,10 @@ def trim_tickers(str):
     str = str.replace(' ', '')
     str = str.replace('\'', '')
     return str
+
+###############################
+### String helper functions ###
+###############################
 
 def add_spaces(s: str, width):
     s_len = len(s)
