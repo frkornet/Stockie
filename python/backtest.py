@@ -69,20 +69,14 @@ class Backtester(object):
         self.stats.batched_idx = self.stats.test_df.sell_date == ''
         gc.collect()
 
-    def __init__(self, keep="3m", threshold=20, update_stats=True):
+    def __init__(self, keep="0m", threshold=20, update_stats=True):
         log(f"Initializing backtester class: ")
-
-        # Read ticker statistics
-        # self.ticker_stats_df = pd.read_csv(STATS_FNM)
-        # idx = self.ticker_stats_df.good == 1
-        # self.tickers = self.ticker_stats_df[idx].ticker.to_list()
-        # log(f"tickers={self.tickers} len(tickers)={len(self.tickers)}\n\n")
 
         # Create a Stats instance and create ticker stats for it
         self.stats = Stats(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
+        self.stats.parse_keep(keep)
         self.stats.calc_stats()
         self.threshold = threshold
-        self.keep = keep
         self.update_stats = update_stats
         self.stats.heuristic(self.threshold, verbose=False)
 
@@ -113,12 +107,6 @@ class Backtester(object):
         # Read ticker statistics
         self.threshold = threshold
         self.stats.heuristic(self.threshold, verbose=False)
-        # self.ticker_stats_df = pd.read_csv(STATS_FNM)
-        # idx = (self.ticker_stats_df.pct_desired >= threshold) \
-        #     & (self.ticker_stats_df.daily_ret > 0)
-        # self.tickers = self.ticker_stats_df[idx].ticker.to_list()
-        # self.len_tickers = len(self.tickers)
-        # log(f"pct_desired({threshold}):len_tickers={self.len_tickers}\n\n")
 
     def log_invested(self, message):
         log(message)
@@ -129,7 +117,6 @@ class Backtester(object):
         log(message)
         log(f"capital={self.myPnL.capital} in_use={self.myPnL.in_use}"
             f" free={self.myPnL.free}")
-
 
     def init_back_test_run(self, capital, max_stocks):
         log("starting backtester")
@@ -143,9 +130,6 @@ class Backtester(object):
                             self.capital, self.in_use, self.free, 
                             self.max_stocks)
 
-        # Sort the possible trades so they are processed in order
-        self.i_possible_trades = 0
-        #self.sort_possible_trades()
 
         self.sell_dates   = {}
 
@@ -155,6 +139,7 @@ class Backtester(object):
             f"{len(self.backtest_trading_dates)}", True)
         log(f'Update statistics          : {self.update_stats}', True)
         log(f'Batch size                 : {self.stats.batch_size}', True)
+        log(f'Keep months                : {self.stats.months}', True)
         log(f'Pct_desired threshold      : {self.threshold}', True)
         log(f'Return column              : {self.ret_col}\n', True)
     
@@ -365,7 +350,7 @@ class Backtester(object):
         return gains, losses
 
 def backtest_run(bt, p):
-    upd_stats, batch_size, th, ret_col = p
+    upd_stats, batch_size, keep, th, ret_col = p
     bt.pct_desired(th)
     bt.run_back_test(10000, 5)
     log('', True)
@@ -378,6 +363,7 @@ def backtest_run(bt, p):
     return { 
             'upd_stats' : upd_stats,
             'batch_size': batch_size,
+            'keep'      : keep,
             'threshold' : th,
             'ret_col'   : ret_col,
             'capital'   : bt.myPnL.capital,
@@ -395,32 +381,31 @@ def plot_backtest_run(bt, th):
 
 # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 thresholds =[
-            (True,  0.05,  0, "daily_ret"     ),
-            (False, 0.05,  0, "daily_ret"     ),
-            (True,  0.05,  0, "gain_daily_ret"),
-            (False,  0.05,  0, "gain_daily_ret"),
+            # (True,  0.05, "0m", 0, "daily_ret"      ),
+            # (False, 0.05, "0m", 0, "daily_ret"      ),
+            # (True,  0.05, "0m", 0, "gain_daily_ret" ),
+            # (False, 0.05, "0m", 0, "gain_daily_ret" ),
 
-            (True,  0.05, 10, "daily_ret"     ),
-            (False, 0.05, 10, "daily_ret"     ),
-            (True,  0.05, 10, "gain_daily_ret"),
-            (False,  0.05, 10, "gain_daily_ret"),
+            # (True,  0.05, "0m", 10, "daily_ret"     ),
+            # (False, 0.05, "0m", 10, "daily_ret"     ),
+            # (True,  0.05, "0m", 10, "gain_daily_ret"),
+            # (False, 0.05, "0m", 10, "gain_daily_ret"),
 
-            (True,  0.05, 20, "daily_ret"     ),
-            (False, 0.05, 20, "daily_ret"     ),
-            (True,  0.05, 20, "gain_daily_ret"),
-            (False, 0.05, 20, "gain_daily_ret"),
+            # (True,  0.05, "0m", 20, "daily_ret"      ),
+            # (False, 0.05, "0m", 20, "daily_ret"      ),
+            # (True,  0.05, "0m", 20, "gain_daily_ret" ),
+            # (False, 0.05, "0m", 20, "gain_daily_ret" ),
 
-            (True,  0.05, 30, "daily_ret"     ),
-            (False, 0.05, 30, "daily_ret"     ),
-            (True,  0.05, 30, "gain_daily_ret"),
-            (False, 0.05, 30, "gain_daily_ret")
-
+            # (True,  0.05, "0m", 30, "daily_ret"      ),
+            # (False, 0.05, "0m", 30, "daily_ret"      ),
+            # (True,  0.05, "0m", 30, "gain_daily_ret" ),
+            (False, 0.05, "0m", 30, "gain_daily_ret" )
         ]
 
-summary_cols=[  "Update", "Batch", "Ret_col", "Threshold", "Capital", "Gains",
+summary_cols=[  "Update", "Batch", "Keep", "Ret_col", "Threshold", "Capital", "Gains",
                 "Losses", "Return", "", "Len", "Invested'"]
-summary_heading_tabs=[ 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 0] 
-summary_value_tabs=  [ 1, 1, 1, 2, 1, 1, 1, 0, 1, 1, 0] 
+summary_heading_tabs=[ 1, 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 0] 
+summary_value_tabs=  [ 1, 1, 1, 1, 2, 1, 1, 1, 0, 1, 1, 0] 
 
 def run_back_set(bt):
     run_dict = {}
@@ -431,10 +416,11 @@ def run_back_set(bt):
             bt.stats.reset_trade_files(TRAIN_TRADE_FNM, TEST_TRADE_FNM)
             bt.augment_possible_trades_with_buy_opportunities()
 
-        upd_stats, batch_size, th, ret_col = p
+        upd_stats, batch_size, keep, th, ret_col = p
         bt.ret_col = ret_col
         bt.update_stats = upd_stats
         bt.stats.batch_size = batch_size
+        bt.stats.parse_keep(keep)
 
         run_dict[i] = backtest_run(bt, p)
         plot_backtest_run(bt, th)
@@ -460,6 +446,7 @@ def print_summary_heading():
 def extract_print_values(run_dict, k, trading_days):
     upd_stats  = run_dict[k]["upd_stats"]
     batch_size = run_dict[k]["batch_size"]
+    keep       = run_dict[k]["keep"]
     th         = run_dict[k]["threshold"]
     ret_col    = run_dict[k]["ret_col"]
     ret_col    = add_spaces(ret_col, 15)
@@ -478,7 +465,7 @@ def extract_print_values(run_dict, k, trading_days):
     gains = int(round(gains/1000,0))
     losses = int(round(losses/1000,0))
 
-    return [ upd_stats, batch_size, ret_col, th, cap, gains, 
+    return [ upd_stats, batch_size, keep, ret_col, th, cap, gains, 
                 losses, ret, "%", length, inv]
 
 def print_values(values):
