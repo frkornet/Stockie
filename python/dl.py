@@ -10,6 +10,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import KFold
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import GridSearchCV
+from keras.models            import load_model
 
 from keras.utils             import np_utils
 from sklearn.preprocessing   import LabelEncoder
@@ -19,7 +20,7 @@ from sklearn.pipeline        import Pipeline
 import numpy as np
 import pandas as pd
 
-from symbols import DATAPATH
+from symbols import DATAPATH, MODELPATH
 from util import get_starttime, calc_runtime
 
 
@@ -518,6 +519,7 @@ def boston_standardize_regression_wide():
     results = cross_val_score(pipeline, X, Y, cv=kfold, n_jobs=-1)
     print("Wider: %.2f (%.2f) MSE" % (results.mean(), results.std()))
 
+
 def boston_standardize_regression_mixed():
     # load dataset
     fnm=f'{DATAPATH}boston.csv'
@@ -549,6 +551,60 @@ def boston_standardize_regression_mixed():
     results = cross_val_score(pipeline, X, Y, cv=kfold, n_jobs=-1)
     print("Wider: %.2f (%.2f) MSE" % (results.mean(), results.std()))
 
+#
+# Chapter 12: Save Your Models For Later With Serialization
+#
+def save_model_file():
+    #load pima indians dataset
+    fnm=f'{DATAPATH}pima-indians-diabetes.csv'
+    dataset = np.loadtxt(fnm, delimiter=",") 
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:8]
+    Y = dataset[:,8]
+    
+    # create model
+    model = Sequential()
+    model.add(Dense(12, input_dim=8, activation='relu'))
+    model.add(Dense(8, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+    
+    # Compile model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy']) 
+    
+    # Fit the model
+    model.fit(X, Y, epochs=150, batch_size=10, verbose=0)
+    
+    # evaluate the model
+    scores = model.evaluate(X, Y, verbose=0)
+    print("%s: %.2f%%" % (model.metrics_names[1], scores[1]*100)) 
+    
+    # save model and architecture to single file 
+    fnm = f'{MODELPATH}model.h5'
+    model.save(fnm)
+    print("Saved model to disk")
+
+
+def load_model_file():
+    # load model
+    fnm = f'{MODELPATH}model.h5'
+    model = load_model(fnm) 
+    
+    # summarize model. 
+    model.summary()
+    
+    # load dataset
+    fnm=f'{DATAPATH}pima-indians-diabetes.csv'
+    dataset = np.loadtxt(fnm, delimiter=",")
+    
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:8]
+    Y = dataset[:,8]
+    
+    # evaluate the model
+    score = model.evaluate(X, Y, verbose=0)
+    print("%s: %.2f%%" % (model.metrics_names[1], score[1]*100))
+
 def print_runtime(func):
     start = get_starttime()
     func()
@@ -565,11 +621,7 @@ if __name__ == "__main__":
     #                 boston_standardize_regression_wide,
     #                 boston_standardize_regression_mixed ]
     #
-    funcs_to_run = [ boston_base_regression, 
-                     boston_standardize_regression,
-                     boston_standardize_regression_deep,
-                     boston_standardize_regression_wide,
-                     boston_standardize_regression_mixed
+    funcs_to_run = [ save_model_file, load_model_file
                     ]
 
     for i, f in enumerate(funcs_to_run):
