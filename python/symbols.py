@@ -23,9 +23,10 @@ BUY             = 1
 SELL            = 2
 STOP_LOSS       = -10 # max loss: -10%
 
-TRADE_COLS      = [ 'buy_date', 'buy_close', 'sell_date', 'sell_close',
-                    'gain_pct', 'trading_days', 'daily_return', 'ticker' ]
-TRADE_COL_TYPES = [ str, float, str, float, float, int, float, str ]
+TRADE_COLS      = [ 'ticker', 'buy_date', 'buy_close', 
+                    'sell_date', 'sell_close',
+                    'gain_pct', 'trading_days', 'daily_return']
+TRADE_COL_TYPES = [ str, str, float, str, float, float, int, float]
 
 STAT_COLS       = ['ticker',
                    'cnt_gain', 'min_pct_gain', 'max_pct_gain', 'std_pct_gain',
@@ -46,3 +47,6 @@ STAT_COL_TYPES  = [str,
 STAT_BATCH_SIZE = 0.05
 
 BT_DRET_COL     = "gain_daily_ret"
+
+MERGE_COLS      = TRADE_COLS      + STAT_COLS[1:]
+MERGE_COL_TYPES = TRADE_COL_TYPES + STAT_COL_TYPES[1:]

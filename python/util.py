@@ -6,7 +6,8 @@ from   tqdm                  import tqdm
 from   time                  import sleep, strftime, strptime, time
 from   datetime              import timedelta, datetime, date
 from   logging               import info, basicConfig, DEBUG, INFO
-from   symbols               import STOCKS_FNM, EXCLUDE_FNM, EXCLUDE_SET
+from   symbols               import STOCKS_FNM, EXCLUDE_FNM, EXCLUDE_SET, \
+                                    LOGPATH
 
 
 ################################
@@ -23,6 +24,10 @@ def log(msg, both=False):
     info(msg)
     if both == True:
         print(msg)
+
+def log_filename(prefix):
+    fnm = prefix + get_current_day_and_time() + ".log"
+    open_logfile(LOGPATH, fnm)
 
 #############################
 ### Date helper functions ###

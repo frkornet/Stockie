@@ -381,25 +381,30 @@ def plot_backtest_run(bt, th):
 
 # thresholds = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 thresholds =[
-            # (True,  0.05, "0m", 0, "daily_ret"      ),
-            # (False, 0.05, "0m", 0, "daily_ret"      ),
-            # (True,  0.05, "0m", 0, "gain_daily_ret" ),
-            # (False, 0.05, "0m", 0, "gain_daily_ret" ),
+            (True,  0.05, "0m", 0, "daily_ret"      ),
+            (False, 0.05, "0m", 0, "daily_ret"      ),
+            #(True,  0.05, "0m", 0, "gain_daily_ret" ),
+            #(False, 0.05, "0m", 0, "gain_daily_ret" ),
 
-            # (True,  0.05, "0m", 10, "daily_ret"     ),
-            # (False, 0.05, "0m", 10, "daily_ret"     ),
-            # (True,  0.05, "0m", 10, "gain_daily_ret"),
-            # (False, 0.05, "0m", 10, "gain_daily_ret"),
+            (True,  0.05, "0m", 10, "daily_ret"     ),
+            (False, 0.05, "0m", 10, "daily_ret"     ),
+            #(True,  0.05, "0m", 10, "gain_daily_ret"),
+            #(False, 0.05, "0m", 10, "gain_daily_ret"),
 
-            # (True,  0.05, "0m", 20, "daily_ret"      ),
-            # (False, 0.05, "0m", 20, "daily_ret"      ),
-            # (True,  0.05, "0m", 20, "gain_daily_ret" ),
-            # (False, 0.05, "0m", 20, "gain_daily_ret" ),
+            (True,  0.05, "0m", 20, "daily_ret"      ),
+            (False, 0.05, "0m", 20, "daily_ret"      ),
+            #(True,  0.05, "0m", 20, "gain_daily_ret" ),
+            #(False, 0.05, "0m", 20, "gain_daily_ret" ),
 
-            # (True,  0.05, "0m", 30, "daily_ret"      ),
-            # (False, 0.05, "0m", 30, "daily_ret"      ),
-            # (True,  0.05, "0m", 30, "gain_daily_ret" ),
-            (False, 0.05, "0m", 30, "gain_daily_ret" )
+            (True,  0.05, "0m", 30, "daily_ret"      ),
+            (False, 0.05, "0m", 30, "daily_ret"      ),
+            (True,  0.05, "0m", 30, "gain_daily_ret" ),
+            (False, 0.05, "0m", 30, "gain_daily_ret" ),
+
+            (True,  0.05, "0m", 40, "daily_ret"      ),
+            (False, 0.05, "0m", 40, "daily_ret"      ),
+            (True,  0.05, "0m", 40, "gain_daily_ret" ),
+            (False, 0.05, "0m", 40, "gain_daily_ret" )
         ]
 
 summary_cols=[  "Update", "Batch", "Keep", "Ret_col", "Threshold", "Capital", "Gains",
