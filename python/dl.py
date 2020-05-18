@@ -1,7 +1,10 @@
 # first neural network with keras tutorial
 from numpy import loadtxt
 from keras.models import Sequential
+from keras.models import load_model
 from keras.layers import Dense
+from keras.callbacks import ModelCheckpoint
+from keras.utils import np_utils
 
 from keras.wrappers.scikit_learn import KerasClassifier 
 from keras.wrappers.scikit_learn import KerasRegressor
@@ -10,9 +13,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import KFold
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import GridSearchCV
-from keras.models            import load_model
 
-from keras.utils             import np_utils
 from sklearn.preprocessing   import LabelEncoder
 from sklearn.preprocessing   import StandardScaler
 from sklearn.pipeline        import Pipeline
@@ -605,6 +606,66 @@ def load_model_file():
     score = model.evaluate(X, Y, verbose=0)
     print("%s: %.2f%%" % (model.metrics_names[1], score[1]*100))
 
+#
+# Chapter 13: Keep The Best Models During Training With Checkpointing
+#
+
+def checkpoint_model_improvements():
+    # load pima indians dataset
+    fnm=f'{DATAPATH}pima-indians-diabetes.csv'
+    dataset = np.loadtxt(fnm, delimiter=",") 
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:8]
+    Y = dataset[:,8]
+
+    # create model
+    model = Sequential()
+    model.add(Dense(12, input_dim=8, activation='relu'))
+    model.add(Dense(8, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy']) 
+
+    # checkpoint
+    filepath = f'{MODELPATH}'+'weights-improvement-{epoch:02d}-{val_accuracy:.2f}.hdf5'
+    checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1,
+                                save_best_only=True, mode='max')
+    callbacks_list = [checkpoint]
+
+    # Fit the model
+    model.fit(X, Y, validation_split=0.33, epochs=150, batch_size=10, 
+            callbacks=callbacks_list, verbose=0)    
+
+def checkpoint_best_model_only():
+    # load pima indians dataset
+    fnm=f'{DATAPATH}pima-indians-diabetes.csv'
+    dataset = np.loadtxt(fnm, delimiter=",") 
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:8]
+    Y = dataset[:,8]
+    
+    # create model
+    model = Sequential()
+    model.add(Dense(12, input_dim=8, activation='relu'))
+    model.add(Dense(8, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+    
+    # Compile model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy']) 
+    
+    # checkpoint
+    filepath=f'{MODELPATH}'+'weights.best.hdf5'
+    checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1,
+                                 save_best_only=True, mode='max') 
+    callbacks_list = [checkpoint]
+        
+    # Fit the model
+    model.fit(X, Y, validation_split=0.33, epochs=150, batch_size=10, 
+              callbacks=callbacks_list, verbose=0)
+
 def print_runtime(func):
     start = get_starttime()
     func()
@@ -619,9 +680,11 @@ if __name__ == "__main__":
     #                 boston_standardize_regression, 
     #                 boston_standardize_regression_deep,
     #                 boston_standardize_regression_wide,
-    #                 boston_standardize_regression_mixed ]
+    #                 boston_standardize_regression_mixed,
+    #                 save_model_file, load_model_file ]
     #
-    funcs_to_run = [ save_model_file, load_model_file
+    funcs_to_run = [ checkpoint_model_improvements, 
+                     checkpoint_best_model_only
                     ]
 
     for i, f in enumerate(funcs_to_run):
