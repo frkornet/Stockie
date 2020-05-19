@@ -1,4 +1,8 @@
-# first neural network with keras tutorial
+#
+# Based upon "Deep Learning with Python" by Jason Brownlee. 
+# The code is packaged into functions so, all the different pieces
+# are availble for learning, testing, and applying to Stockie
+#
 from numpy import loadtxt
 from keras.models import Sequential
 from keras.models import load_model
@@ -20,6 +24,7 @@ from sklearn.pipeline        import Pipeline
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from symbols import DATAPATH, MODELPATH
 from util import get_starttime, calc_runtime
@@ -666,6 +671,53 @@ def checkpoint_best_model_only():
     model.fit(X, Y, validation_split=0.33, epochs=150, batch_size=10, 
               callbacks=callbacks_list, verbose=0)
 
+#
+# Chapter 14: Understand Model Behavior During Training By Plotting History
+#
+def plot_history():
+    # load pima indians dataset
+    fnm=f'{DATAPATH}pima-indians-diabetes.csv'
+    dataset = np.loadtxt(fnm, delimiter=",")
+    
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:8]
+    Y = dataset[:,8]
+
+    # create model
+    model = Sequential()
+    model.add(Dense(12, input_dim=8, activation='relu'))
+    model.add(Dense(8, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+    # Fit the model
+    history = model.fit(X, Y, validation_split=0.33, epochs=150, batch_size=10, verbose=0)
+
+    # list all data in history
+    print(history.history.keys())
+
+    # summarize history for accuracy
+    plt.plot(history.history['accuracy'])
+    plt.plot(history.history['val_accuracy'])
+    plt.title('model accuracy')
+    plt.ylabel('accuracy')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
+
+    # summarize history for loss
+    plt.plot(history.history['loss'][10:]) 
+    plt.plot(history.history['val_loss'][10:]) 
+    plt.title('model loss')
+    plt.ylabel('loss')
+    #plt.yticks(np.arange(0.450, 0.700, 0.025))
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left') 
+    plt.show()
+
+
 def print_runtime(func):
     start = get_starttime()
     func()
@@ -681,11 +733,13 @@ if __name__ == "__main__":
     #                 boston_standardize_regression_deep,
     #                 boston_standardize_regression_wide,
     #                 boston_standardize_regression_mixed,
-    #                 save_model_file, load_model_file ]
+    #                 save_model_file, load_model_file,
+    #                 checkpoint_model_improvements, 
+    #                 checkpoint_best_model_only,
+    #                 plot_history ]
     #
-    funcs_to_run = [ checkpoint_model_improvements, 
-                     checkpoint_best_model_only
-                    ]
+    funcs_to_run = [ plot_history
+                ]
 
     for i, f in enumerate(funcs_to_run):
         stars="*"*80
