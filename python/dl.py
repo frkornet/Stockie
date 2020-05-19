@@ -7,7 +7,10 @@ from numpy import loadtxt
 from keras.models import Sequential
 from keras.models import load_model
 from keras.layers import Dense
+from keras.layers import Dropout
+from keras.constraints import maxnorm
 from keras.callbacks import ModelCheckpoint
+from keras.callbacks import LearningRateScheduler
 from keras.utils import np_utils
 
 from keras.wrappers.scikit_learn import KerasClassifier 
@@ -18,6 +21,8 @@ from sklearn.model_selection import KFold
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import GridSearchCV
 
+from keras.optimizers        import SGD
+
 from sklearn.preprocessing   import LabelEncoder
 from sklearn.preprocessing   import StandardScaler
 from sklearn.pipeline        import Pipeline
@@ -25,6 +30,7 @@ from sklearn.pipeline        import Pipeline
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import math
 
 from symbols import DATAPATH, MODELPATH
 from util import get_starttime, calc_runtime
@@ -712,10 +718,202 @@ def plot_history():
     plt.plot(history.history['val_loss'][10:]) 
     plt.title('model loss')
     plt.ylabel('loss')
-    #plt.yticks(np.arange(0.450, 0.700, 0.025))
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left') 
     plt.show()
+
+#
+# Chapter 15: Reduce Overfitting With Dropout Regularization
+#
+def no_dropout():
+    # load dataset
+    fnm=f'{DATAPATH}/sonar.csv'
+    dataframe = pd.read_csv(fnm, header=None)
+    dataset = dataframe.values
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:60].astype(float)
+    Y = dataset[:,60]
+
+    # encode class values as integers
+    encoder = LabelEncoder()
+    encoder.fit(Y)
+    encoded_Y = encoder.transform(Y)
+
+    # baseline
+    def create_baseline():
+        # create model
+        model = Sequential()
+        model.add(Dense(60, input_dim=60, activation='relu')) 
+        model.add(Dense(30, activation='relu')) 
+        model.add(Dense(1, activation='sigmoid'))
+
+        # Compile model
+        sgd = SGD(lr=0.01, momentum=0.8)
+        model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy']) 
+        return model
+
+    estimators = []
+    estimators.append(('standardize', StandardScaler()))
+    estimators.append(('mlp', KerasClassifier(build_fn=create_baseline, epochs=300,
+                    batch_size=16, verbose=0)))
+    pipeline = Pipeline(estimators)
+    kfold = StratifiedKFold(n_splits=10, shuffle=True)
+    
+    results = cross_val_score(pipeline, X, encoded_Y, cv=kfold, n_jobs=-1)
+    print("Baseline: %.2f%% (%.2f%%)" % (results.mean()*100, results.std()*100))
+
+def dropout_input_only():
+    # load dataset
+    fnm=f'{DATAPATH}/sonar.csv'
+    dataframe = pd.read_csv(fnm, header=None)
+    dataset = dataframe.values
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:60].astype(float)
+    Y = dataset[:,60]
+
+    # encode class values as integers
+    encoder = LabelEncoder()
+    encoder.fit(Y)
+    encoded_Y = encoder.transform(Y)
+
+    # dropout in the input layer with weight constraint
+    def create_model():
+        # create model
+        model = Sequential()
+        model.add(Dropout(0.2, input_shape=(60,)))
+        model.add(Dense(60, activation='relu', kernel_constraint=maxnorm(3))) 
+        model.add(Dense(30, activation='relu', kernel_constraint=maxnorm(3))) 
+        model.add(Dense(1, activation='sigmoid'))
+
+        # Compile model
+        sgd = SGD(lr=0.1, momentum=0.9)
+        model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy']) 
+        return model
+
+    estimators = []
+    estimators.append(('standardize', StandardScaler()))
+    estimators.append(('mlp', KerasClassifier(build_fn=create_model, epochs=300, 
+                       batch_size=16, verbose=0)))
+    pipeline = Pipeline(estimators)
+    kfold = StratifiedKFold(n_splits=10, shuffle=True)
+    results = cross_val_score(pipeline, X, encoded_Y, cv=kfold, n_jobs=-1)
+    print("Visible: %.2f%% (%.2f%%)" % (results.mean()*100, results.std()*100))
+
+def dropout_all_layers():
+    # load dataset
+    fnm=f'{DATAPATH}/sonar.csv'
+    dataframe = pd.read_csv(fnm, header=None) 
+    dataset = dataframe.values
+
+    # split into input (X) and output (Y) variables 
+    X = dataset[:,0:60].astype(float)
+    Y = dataset[:,60]
+
+    # encode class values as integers
+    encoder = LabelEncoder() 
+    encoder.fit(Y)
+    encoded_Y = encoder.transform(Y)
+
+    # dropout in hidden layers with weight constraint
+    def create_model():
+        # create model
+        model = Sequential()
+        model.add(Dense(60, input_dim=60, activation='relu', kernel_constraint=maxnorm(3))) 
+        model.add(Dropout(0.2))
+        model.add(Dense(30, activation='relu', kernel_constraint=maxnorm(3))) 
+        model.add(Dropout(0.2))
+        model.add(Dense(1, activation='sigmoid'))
+
+        # Compile model
+        sgd = SGD(lr=0.1, momentum=0.9)
+        model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy']) 
+        return model
+
+    estimators = []
+    estimators.append(('standardize', StandardScaler()))
+    estimators.append(('mlp', KerasClassifier(build_fn=create_model, epochs=300, 
+                       batch_size=16, verbose=0)))
+    pipeline = Pipeline(estimators)
+    kfold = StratifiedKFold(n_splits=10, shuffle=True)
+    results = cross_val_score(pipeline, X, encoded_Y, cv=kfold, n_jobs=-1)
+    print("Hidden: %.2f%% (%.2f%%)" % (results.mean()*100, results.std()*100))
+
+#
+# Chapter 16: Lift Performance With Learning Rate Schedules
+#
+def lr_schedule_time_based():
+    # load dataset
+    fnm=f'{DATAPATH}/ionosphere.csv'
+    dataframe = pd.read_csv(fnm, header=None)
+    dataset = dataframe.values
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:34].astype(float)
+    Y = dataset[:,34]
+
+    # encode class values as integers
+    encoder = LabelEncoder()
+    encoder.fit(Y)
+    Y = encoder.transform(Y)
+
+    # create model
+    model = Sequential()
+    model.add(Dense(34, input_dim=34, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    epochs = 50
+    learning_rate = 0.1
+    decay_rate = learning_rate / epochs
+    momentum = 0.8
+    sgd = SGD(lr=learning_rate, momentum=momentum, decay=decay_rate, nesterov=False) 
+    model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy'])
+    
+    # Fit the model
+    model.fit(X, Y, validation_split=0.33, epochs=epochs, batch_size=28, verbose=2)
+
+def lr_schedule_drop_based():
+    # learning rate schedule
+    def step_decay(epoch):
+        initial_lrate = 0.1
+        drop = 0.5
+        epochs_drop = 10.0
+        lrate = initial_lrate * math.pow(drop, math.floor((1+epoch)/epochs_drop)) 
+        return lrate
+
+    # load dataset
+    fnm=f'{DATAPATH}/ionosphere.csv'
+    dataframe = pd.read_csv(fnm, header=None) 
+    dataset = dataframe.values
+
+    # split into input (X) and output (Y) variables
+    X = dataset[:,0:34].astype(float)
+    Y = dataset[:,34]
+
+    # encode class values as integers
+    encoder = LabelEncoder() 
+    encoder.fit(Y)
+    Y = encoder.transform(Y) 
+    
+    # create model
+    model = Sequential()
+    model.add(Dense(34, input_dim=34, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+    
+    # Compile model
+    sgd = SGD(lr=0.0, momentum=0.9)
+    model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy'])
+    
+    # learning schedule callback
+    lrate = LearningRateScheduler(step_decay)
+    callbacks_list = [lrate]
+    
+    # Fit the model
+    model.fit(X, Y, validation_split=0.33, epochs=50, batch_size=28, 
+            callbacks=callbacks_list, verbose=2)
+
 
 
 def print_runtime(func):
@@ -736,9 +934,10 @@ if __name__ == "__main__":
     #                 save_model_file, load_model_file,
     #                 checkpoint_model_improvements, 
     #                 checkpoint_best_model_only,
-    #                 plot_history ]
+    #                 plot_history, no_dropout, 
+    #                 dropout_input_only, dropout_all_layers ]
     #
-    funcs_to_run = [ plot_history
+    funcs_to_run = [ lr_schedule_time_based, lr_schedule_drop_based
                 ]
 
     for i, f in enumerate(funcs_to_run):
