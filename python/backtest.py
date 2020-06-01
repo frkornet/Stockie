@@ -408,7 +408,7 @@ thresholds =[
         ]
 
 summary_cols=[  "Update", "Batch", "Keep", "Ret_col", "Threshold", "Capital", "Gains",
-                "Losses", "Return", "", "Len", "Invested'"]
+                "Losses", "Return", "", "Len", "Invested"]
 summary_heading_tabs=[ 1, 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 0] 
 summary_value_tabs=  [ 1, 1, 1, 1, 2, 1, 1, 1, 0, 1, 1, 0] 
 
