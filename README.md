@@ -43,7 +43,7 @@ The program will create a log file in the "log" sub-directory (prefixed with "jo
 
 You can specify the combinations that you want to run by editing backtest.py:
 
-thresholds =[
+`thresholds =[
             (True,  0.05, "0m", 0, "daily_ret"      ),
             (False, 0.05, "0m", 0, "daily_ret"      ),
 
@@ -54,7 +54,7 @@ thresholds =[
 
             (True,  0.05, "0m", 40, "daily_ret"      ),
             (False, 0.05, "0m", 40, "daily_ret"      ),
-        ]
+        ]`
         
 The first param is whether or not the statistics need to be cointinually updated while the backtest runs. 
 The second parameter is batchsize (percentage). 
