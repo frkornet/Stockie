@@ -81,7 +81,8 @@ None at this point.
 
 ## Acknowledgements
 
-Bryan Arnolds from Flatiron for the initial idea of smoothing a curve. Also, Carson Lloyd for developing initial web scraping.
+Bryan Arnolds from Flatiron for the initial idea of smoothing a curve. 
+Also, Carson Lloyd for showing me how to develop the web scraping solution for converting stock identification numbers to stock ticker symbols need by yfinance.
 
 ## Contact Information
 
