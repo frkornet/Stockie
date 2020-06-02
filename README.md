@@ -22,10 +22,12 @@ $ git clone https://github.com/frkornet/Stockie
 2) Open symbols.py in the python subdirectory in an editor and change "/Users/frkornet/Stockie/" to point 
 to the directory where you cloned Stockie
 
-- LOGPATH         = '<Stockie root directory>/log/'
-- DATAPATH        = '<Stockie root directory>/data/'
-- PICPATH         = '<Stockie root directory>/pic/'
-- MODELPATH       = '<Stockie root directory>/model/'
+```
+LOGPATH   = '<Stockie root directory>/log/'
+DATAPATH  = '<Stockie root directory>/data/'
+PICPATH   = '<Stockie root directory>/pic/'
+MODELPATH = '<Stockie root directory>/model/'
+```
 
 ## How to Use
 
