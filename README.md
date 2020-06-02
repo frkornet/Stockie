@@ -84,3 +84,5 @@ Bryan Arnolds from Flatiron for the initial idea of smoothing a curve. Also, Car
 ## Contact Information
 
 If you want to contact the developer, please send me an email to frkornet@gmail.com addressed to "Frank Kornet" with subject "Stockie". I will read my email daily and will respond ones I get your email.
+
+You may also find more information on what I am working on at https://frankoncomputing.com (including Stockie). 
