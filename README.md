@@ -9,15 +9,16 @@ into $150K - $200K over a three-year period. Much better than market returns in 
 
 Stockie requires the following to be installed:
 
-Python 3.7
-Scikit-Learn 0.23
-yfinance 0.1.54
+* Python 3.7
+* Scikit-Learn 0.23
+* yfinance 0.1.54
 
 ## How to Install
 
 1) Clone and down load Stockie repository to your machine using
-
+```
 $ git clone https://github.com/frkornet/Stockie
+```
 
 2) Open symbols.py in the python subdirectory in an editor and change "/Users/frkornet/Stockie/" to point 
 to the directory where you cloned Stockie
@@ -27,6 +28,12 @@ LOGPATH   = '<Stockie root directory>/log/'
 DATAPATH  = '<Stockie root directory>/data/'
 PICPATH   = '<Stockie root directory>/pic/'
 MODELPATH = '<Stockie root directory>/model/'
+```
+
+3) add a log directory in the <Stockie root directory>:
+```
+$ cd <Stockie root directory>
+$ mkdir log
 ```
 
 ## How to Use

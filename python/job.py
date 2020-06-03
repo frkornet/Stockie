@@ -22,7 +22,7 @@ def job_main():
     stats_main()
     log('stats_main() is done.')
 
-    log('Starting bactest_main().')
+    log('Starting backtest_main().')
     backtest_main()
     log('backtest_main() is done.')
 
